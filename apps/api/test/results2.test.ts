@@ -1,5 +1,6 @@
 /** Gestão de Resultados fases 3–4: metas por área com aprovação, pedido de revisão, apuração oficial versionada e série mensal. */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { sql } from 'drizzle-orm';
 import { login, makeApp, type Client } from './helpers';
 
 let ctx: Awaited<ReturnType<typeof makeApp>>;
@@ -108,7 +109,9 @@ describe('times: vários líderes e gestores, visibilidade e centro de custo', (
       expect(scope.teams.map((t: { id: string }) => t.id).sort()).toEqual(expect.arrayContaining([t1!.id, t2!.id]));
       const perf = (await lucas2.get('/times/performance')).json();
       if (!perf.pending) expect((perf.teams as { teamId: string }[]).every((t) => scope.teams.some((x: { id: string }) => x.id === t.teamId))).toBe(true);
-      const ccs = (await carlos2.get('/budget/structure')).json().costCenters as { name: string; code: string }[];
+      // cada time vira centro de custo (a lista do orçamento só mostra os centros em que a pessoa está: confere no cadastro)
+      await carlos2.get('/budget/structure');
+      const ccs = (await ctx.db.execute(sql`select name, code from cost_centers where team_id = ${t1!.id}`)).rows as { name: string; code: string }[];
       expect(ccs.some((c) => c.name === t1!.name && c.code.startsWith('T-'))).toBe(true);
       // volta
       await carlos2.patch(`/results/org/teams/${t1!.id}`, { managerIds: [] });

@@ -22,7 +22,7 @@ import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import { audit } from '../services/audit';
 import { brl } from '../services/email';
-import { accountsOf, costCenterRole, costCentersOf, decidesStages, isBudgetAdmin, isFinance, loadCostCenter, logBudget, nextLineCode } from '../services/budget';
+import { accountsOf, costCenterRole, costCentersOf, decidesStages, isBudgetAdmin, isFinance, loadCostCenter, seesCostCenter, logBudget, nextLineCode } from '../services/budget';
 import { groupBy } from '../services/group';
 import { todayIn } from '../services/vacations';
 import { assertOpenPeriod, checkCostCenterLimit, deciders, notifyBudget } from '../services/budgetClosing';
@@ -46,7 +46,9 @@ export function ccAccess(auth: AuthContext, c: CC) {
   const role = costCenterRole(c, auth.userId);
   const oversees = c.managerId === auth.userId || c.directorId === auth.userId;
   const admin = isBudgetAdmin(auth);
-  return { see: admin || role !== null || oversees || isFinance(auth), plan: admin || role === 'dono', execute: admin || role !== null, oversees };
+  // só quem está no centro e tem perfil de liderança vê; o resto decide o que faz dentro dele
+  const see = seesCostCenter(auth, c);
+  return { see, plan: see && (admin || role === 'dono'), execute: see && (admin || role !== null), oversees: see && oversees };
 }
 export async function visibleCostCenters(db: DbOrTx, auth: AuthContext) {
   await costCentersOf(db, auth); // garante os centros dos times

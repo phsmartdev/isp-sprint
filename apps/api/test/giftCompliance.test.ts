@@ -2,7 +2,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import * as s from '../src/db/schema';
-import { login, makeApp, type Client } from './helpers';
+import { joinCostCenters, leaveCostCenters, login, makeApp, type Client } from './helpers';
 
 let ctx: Awaited<ReturnType<typeof makeApp>>;
 let carlos: Client, lucas: Client, rafael: Client, dir: Client;
@@ -34,6 +34,7 @@ beforeAll(async () => {
   ok(await rule({ name: `Patrocínio a ente público ${stamp}`, param: 'condicao', controlType: 'restricao', natures: ['publica'], kinds: ['patrocinio_financeiro'] }), 201);
 });
 afterAll(async () => {
+  await leaveCostCenters(ctx, carlos);
   // as diretrizes valem para a empresa toda: desliga as do teste para não afetar outros testes
   const rules = ok(await carlos.get('/brindes/compliance/diretrizes')).json().rules as { ruleKey: string; version: number; name: string; param: string; controlType: string; limitValue: number | null; natures: string[]; kinds: string[] }[];
   for (const r of rules.filter((x) => x.name.includes(stamp) || x.ruleKey.startsWith('politica-'))) {
@@ -223,6 +224,7 @@ describe('compliance de concessões', () => {
     // subconta própria do teste (não usa o plano sugerido: outra suíte testa a criação dele no mesmo banco)
     const tenantId = (await ctx.app.db.select({ t: s.users.tenantId }).from(s.users).where(eq(s.users.email, 'carlos@yepnet.test')))[0]!.t;
     await ctx.app.db.insert(s.budgetAccounts).values({ tenantId, code: 'ZZ-GC-TESTE', name: 'Concessões (teste)' }).onConflictDoNothing();
+    await joinCostCenters(ctx, carlos); // regra de 26/11/2026: fora da Diretoria só vê o centro quem está nele
     const opt = ok(await carlos.get(`/brindes/compliance/solicitacoes/${r1.id}/orcamento-opcoes`)).json();
     expect(opt.accounts.length).toBeGreaterThan(0);
     const cc = opt.costCenters.find((c: { canPlan: boolean }) => c.canPlan);

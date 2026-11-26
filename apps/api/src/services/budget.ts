@@ -79,11 +79,24 @@ export function costCenterRole(c: CC, userId: string): 'dono' | 'execucao' | nul
   if (owner) return 'dono';
   return (c.executorIds.length ? c.executorIds.includes(userId) : c.memberIds.includes(userId)) ? 'execucao' : null;
 }
+/**
+ * Quem vê o orçamento (decisão de 26/11/2026): a Diretoria vê todos os centros (aprovação final); Gerência,
+ * Supervisão (Liderança) e Administrador só os centros em que estão; Operação não vê. Fora da Diretoria, o nível
+ * Total em Recursos e Orçamento vale só dentro dos próprios centros (planeja, aprova). Não há exceção por setor.
+ */
+export const BUDGET_PROFILES = ['diretoria', 'gerencia', 'supervisor', 'administrador'] as const;
+export const isBudgetLeader = (auth: Pick<AuthContext, 'profiles'>) => auth.profiles.some((p) => (BUDGET_PROFILES as readonly string[]).includes(p));
+/** Está no centro: dono, execução, membro, líder, gestor ou diretor responsável. */
+export const inCostCenter = (c: CC, userId: string) =>
+  costCenterRole(c, userId) !== null || c.leaderId === userId || c.memberIds.includes(userId) || c.managerId === userId || c.directorId === userId;
+export const seesCostCenter = (auth: AuthContext, c: CC) => auth.profiles.includes('diretoria') || (isBudgetLeader(auth) && inCostCenter(c, auth.userId));
+
 export type CostCenterNeed = 'ver' | 'planejar' | 'executar';
 const allows = (auth: AuthContext, c: CC, need: CostCenterNeed) => {
+  if (!seesCostCenter(auth, c)) return false;
   if (isBudgetAdmin(auth)) return true;
   const r = costCenterRole(c, auth.userId);
-  return need === 'planejar' ? r === 'dono' : r !== null;
+  return need === 'ver' ? true : need === 'planejar' ? r === 'dono' : r !== null;
 };
 
 /** Perfis aceitos em cada papel do centro de custo. */
@@ -106,7 +119,7 @@ export async function costCentersOf(db: DbOrTx, auth: AuthContext, includeInacti
   await ensureTeamCostCenters(db, auth.tenantId);
   const all = await db.select().from(s.costCenters).where(eq(s.costCenters.tenantId, auth.tenantId)).orderBy(s.costCenters.code);
   const list = includeInactive ? all : all.filter((c) => c.active);
-  return isBudgetAdmin(auth) ? list : list.filter((c) => costCenterRole(c, auth.userId) !== null);
+  return list.filter((c) => seesCostCenter(auth, c));
 }
 /** Centro de custo que a pessoa pode operar (líder, indicado pelo líder ou Diretoria). */
 export async function loadCostCenter(db: DbOrTx, auth: AuthContext, id: string, need: CostCenterNeed = 'ver') {

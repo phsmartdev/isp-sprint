@@ -589,7 +589,7 @@ export const budgetRoutes = [
     handler: async ({ app, auth, query }) => {
       const ccs = await costCentersOf(app.db, auth, true);
       const ids = query.costCenterId ? ccs.filter((c) => c.id === query.costCenterId).map((c) => c.id) : ccs.map((c) => c.id);
-      const where = isBudgetAdmin(auth) && !query.costCenterId ? eq(s.budgetEvents.tenantId, auth.tenantId) : and(eq(s.budgetEvents.tenantId, auth.tenantId), ids.length ? inArray(s.budgetEvents.costCenterId, ids) : sql`false`);
+      const where = and(eq(s.budgetEvents.tenantId, auth.tenantId), ids.length ? inArray(s.budgetEvents.costCenterId, ids) : sql`false`);
       const items = await app.db.select({ id: s.budgetEvents.id, costCenterId: s.budgetEvents.costCenterId, entity: s.budgetEvents.entity, action: s.budgetEvents.action, summary: s.budgetEvents.summary, createdAt: s.budgetEvents.createdAt, actor: s.users.name })
         .from(s.budgetEvents).leftJoin(s.users, eq(s.users.id, s.budgetEvents.actorId)).where(where).orderBy(desc(s.budgetEvents.createdAt)).limit(query.limit);
       return { items };

@@ -37,3 +37,18 @@ export async function login(app: FastifyInstance, email: string, password = PASS
     app.inject({ method, url: `/api/v1${url}`, headers: { cookie, origin: ORIGIN }, ...(body !== undefined ? { payload: body as object } : {}) });
   return { cookie, get: send('GET'), post: send('POST'), patch: send('PATCH'), put: send('PUT'), del: (url: string, body?: unknown) => send('DELETE')(url, body), me: res.json() };
 }
+
+/**
+ * Orçamento (regra de 26/11/2026): fora da Diretoria, só vê o centro quem está nele. Nos testes, a Gerência
+ * (Carlos) entra como diretor responsável dos centros que ainda não têm um — como a gestão faria no cadastro.
+ */
+export async function joinCostCenters(ctx: { db: { execute: (q: ReturnType<typeof import('drizzle-orm').sql>) => Promise<unknown> } }, c: Client) {
+  const { sql } = await import('drizzle-orm');
+  await c.get('/budget/structure'); // cria os centros dos times
+  await ctx.db.execute(sql`update cost_centers set director_id = ${c.me.user.id} where tenant_id = ${c.me.tenant.id} and director_id is null`);
+}
+/** Desfaz o joinCostCenters (o banco de teste é compartilhado entre as suítes). */
+export async function leaveCostCenters(ctx: { db: { execute: (q: ReturnType<typeof import('drizzle-orm').sql>) => Promise<unknown> } }, c: Client) {
+  const { sql } = await import('drizzle-orm');
+  await ctx.db.execute(sql`update cost_centers set director_id = null where tenant_id = ${c.me.tenant.id} and director_id = ${c.me.user.id}`);
+}
