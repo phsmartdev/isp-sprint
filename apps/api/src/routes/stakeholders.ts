@@ -194,10 +194,10 @@ export const stakeholderRoutes = [
       ]);
       const otherIds = [...new Set(rels.flatMap((r) => [r.fromId, r.toId]).filter((x) => x !== st.id))];
       const others = otherIds.length ? await app.db.select({ id: s.accountStakeholders.id, name: s.people.name }).from(s.accountStakeholders).innerJoin(s.people, eq(s.people.id, s.accountStakeholders.personId)).where(inArray(s.accountStakeholders.id, otherIds)) : [];
-      const [person] = await app.db.select({ sourceSystem: s.people.sourceSystem, externalId: s.people.externalId }).from(s.people).where(eq(s.people.id, st.personId)).limit(1);
+      const [person] = await app.db.select({ sourceSystem: s.people.sourceSystem, externalId: s.people.externalId, rowVersion: s.people.rowVersion }).from(s.people).where(eq(s.people.id, st.personId)).limit(1);
       const links = await linksOfStakeholder(app.db, auth, st.id);
       return {
-        ...row!, links, personOrigin: person && person.sourceSystem !== 'crm' ? person : null, policy: { labels: pol.influence.labels, view: show, edit: canEditInfluence(auth, pol.influence), requireApproval: pol.influence.requireApproval },
+        ...row!, links, personRowVersion: person?.rowVersion ?? 0, personOrigin: person && person.sourceSystem !== 'crm' ? { sourceSystem: person.sourceSystem, externalId: person.externalId } : null, policy: { labels: pol.influence.labels, view: show, edit: canEditInfluence(auth, pol.influence), requireApproval: pol.influence.requireApproval },
         influenceHistory: hist.map((h) => ({ ...h, actorName: uname(h.actorId), approvedByName: uname(h.approvedBy) })),
         requests: reqs.map((r) => ({ ...r, requestedByName: uname(r.requestedBy), decidedByName: uname(r.decidedBy) })),
         events: events.map((e) => ({ ...e, actorName: uname(e.actorId) })),

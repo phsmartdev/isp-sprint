@@ -23,6 +23,7 @@ import { ActivityRow } from '../features/ActivityRow';
 import { ClassificationSection } from '../features/Classification';
 import { AccountContracts } from '../features/contracts/AccountContracts';
 import { IxcFinance, IxcOrders } from '../features/ixc/IxcPanels';
+import { AccountEditButtons } from '../features/accounts/AccountEdit';
 
 type Detail = {
   id: string;
@@ -33,6 +34,7 @@ type Detail = {
   email: string | null;
   segment: Segment;
   city: string | null;
+  nature?: 'publica' | 'privada' | null;
   isProvisional: boolean;
   custom: CustomValues;
   createdAt: string;
@@ -183,6 +185,7 @@ export function CustomerDetailPage() {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-3">
+          {can('clientes') && <AccountEditButtons account={c} />}
           {feature('marketing.abm') && <AddToAbmButton contactId={id} contactName={c.name} />}
           {can('oportunidades') && <Button variant="primary" size="lg" onClick={() => nav('/opportunities/new')}>+ Nova oportunidade</Button>}
         </div>

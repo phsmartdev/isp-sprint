@@ -91,9 +91,10 @@ export async function createOpportunity(tx: DbOrTx, auth: AuthContext, req: Fast
       .select({ name: s.contacts.name, segment: s.contacts.segment })
       .from(s.contacts)
       // órgão da ata: o contato é do cadastro da ata, não da carteira de quem cria
-      .where(opts.trustedContact ? and(eq(s.contacts.id, contactId), eq(s.contacts.tenantId, auth.tenantId)) : and(eq(s.contacts.id, contactId), ownerScope(auth, 'clientes', { tenantId: s.contacts.tenantId, ownerId: s.contacts.ownerId, deletedAt: s.contacts.deletedAt })))
+      // as contas são da empresa: qualquer conta ativa dela pode receber uma oportunidade
+      .where(and(eq(s.contacts.id, contactId), eq(s.contacts.tenantId, auth.tenantId), isNull(s.contacts.deletedAt)))
       .limit(1);
-    if (!c) throw unprocessable('Referência inválida.', [{ path: 'contactId', message: 'Contato fora da sua carteira' }]);
+    if (!c) throw unprocessable('Referência inválida.', [{ path: 'contactId', message: 'Conta não encontrada' }]);
     contactName = c.name;
     segment = c.segment;
   }

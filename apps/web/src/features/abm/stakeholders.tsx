@@ -162,6 +162,12 @@ function StakeholderDrawer({ id, contactId, units, peers, onClose, preset }: { i
     mutationFn: () => api(`/stakeholders/${id}`, { method: 'PATCH', body: { rowVersion: d!.rowVersion, ...f } }),
     onSuccess: () => { setF(null); refresh(); toast({ tone: 'success', message: 'Stakeholder atualizado' }); }, onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
   });
+  const [personEdit, setPersonEdit] = useState<{ name: string; email: string; phone: string } | null>(null);
+  useEffect(() => setPersonEdit(null), [id]);
+  const savePerson = useMutation({
+    mutationFn: () => api(`/people/${d!.personId}`, { method: 'PATCH', body: { rowVersion: (d as unknown as { personRowVersion: number }).personRowVersion, stakeholderId: d!.id, name: personEdit!.name.trim(), email: personEdit!.email.trim().toLowerCase() || null, phone: personEdit!.phone.trim() || null } }),
+    onSuccess: () => { setPersonEdit(null); refresh(); void qc.invalidateQueries({ queryKey: ['stakeholders', 'one', id] }); toast({ tone: 'success', message: 'Contato atualizado' }); }, onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
+  });
   const [inf, setInf] = useState({ contextType: (preset?.contextType ?? 'conta') as InfluenceContext, contextKey: preset?.contextKey ?? '', contextLabel: preset?.contextLabel ?? '', level: 'nao_avaliado' as InfluenceLevel, justification: '', evidence: '' });
   useEffect(() => { if (preset) setInf((o) => ({ ...o, ...preset })); }, [preset?.contextKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const evaluate = useMutation({
@@ -180,7 +186,18 @@ function StakeholderDrawer({ id, contactId, units, peers, onClose, preset }: { i
     <Drawer open={!!id} onClose={onClose} title="Stakeholder" width="lg">
       {!d ? <LoadingRows rows={6} /> : (
         <div className="space-y-5">
-          <div className="flex flex-wrap items-start justify-between gap-2"><div><h3 className="text-lg font-bold text-ink">{d.name}</h3><p className="text-sm text-muted">{[d.title, d.unitName, d.account].filter(Boolean).join(' · ')}</p>{(d.email || d.phone) && <p className="text-sm">{[d.email, d.phone].filter(Boolean).join(' · ')}</p>}</div><Button size="sm" variant="secondary" onClick={() => setSurvey(true)}>Enviar pesquisa</Button></div>
+          <div className="flex flex-wrap items-start justify-between gap-2"><div><h3 className="text-lg font-bold text-ink">{d.name}</h3><p className="text-sm text-muted">{[d.title, d.unitName, d.account].filter(Boolean).join(' · ')}</p>{(d.email || d.phone) ? <p className="text-sm">{[d.email, d.phone].filter(Boolean).join(' · ')}</p> : <p className="text-sm text-muted">Sem e-mail nem telefone</p>}</div><div className="flex flex-wrap gap-2"><Button size="sm" variant="ghost" onClick={() => setPersonEdit({ name: d.name, email: d.email ?? '', phone: d.phone ?? '' })}>Editar contato</Button><Button size="sm" variant="secondary" onClick={() => setSurvey(true)}>Enviar pesquisa</Button></div></div>
+          {personEdit && (
+            <div className="space-y-3 border border-line p-3" aria-label="Contato da pessoa">
+              <p className="text-xs text-muted">Os dados da pessoa valem em todas as contas a que ela está ligada.</p>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <FormField label="Nome" htmlFor="pe-n"><Input id="pe-n" value={personEdit.name} onChange={(e) => setPersonEdit({ ...personEdit, name: e.target.value })} /></FormField>
+                <FormField label="E-mail" htmlFor="pe-e"><Input id="pe-e" type="email" value={personEdit.email} onChange={(e) => setPersonEdit({ ...personEdit, email: e.target.value })} /></FormField>
+                <FormField label="Telefone" htmlFor="pe-p"><Input id="pe-p" value={personEdit.phone} onChange={(e) => setPersonEdit({ ...personEdit, phone: e.target.value })} /></FormField>
+              </div>
+              <div className="flex gap-2"><Button size="sm" variant="primary" loading={savePerson.isPending} disabled={personEdit.name.trim().length < 2} onClick={() => savePerson.mutate()}>Salvar contato</Button><Button size="sm" variant="ghost" onClick={() => setPersonEdit(null)}>Cancelar</Button></div>
+            </div>
+          )}
           {survey && <InviteDialog preset={{ contactId, account: d.account, stakeholderId: d.id }} onClose={() => setSurvey(false)} />}
           <StakeholderGifts id={d.id} />
 

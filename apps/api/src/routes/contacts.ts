@@ -2,13 +2,13 @@ import { and, desc, eq, ilike, isNull, or, sql, type SQL } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import { z } from 'zod';
 import { ContactCreate, CustomerListQuery } from '@isp/shared';
-import { onlyDigits } from '@isp/domain';
+import { onlyDigits, SEGMENTS } from '@isp/domain';
 import { defineRoute, IdParams } from '../http/route';
-import { notFound, unprocessable } from '../http/errors';
+import { notFound, unprocessable, forbidden } from '../http/errors';
 import type { AuthContext } from '../http/context';
 import * as s from '../db/schema';
 import { audit } from '../services/audit';
-import { assertAssignableUser, ownerScope } from '../services/scope';
+import { assertAssignableUser, level, ownerScope } from '../services/scope';
 import { opportunityDto, opportunityQuery, oppVisibility } from '../services/opportunities';
 import { ratio } from '../services/metrics';
 import { freshSnapshot } from '../services/cs';
@@ -19,6 +19,71 @@ const owner = alias(s.users, 'cust_owner');
 const scope = (auth: AuthContext) => ownerScope(auth, 'clientes', { tenantId: s.contacts.tenantId, ownerId: s.contacts.ownerId, deletedAt: s.contacts.deletedAt });
 
 export const contactRoutes = [
+  defineRoute({
+    method: 'PATCH',
+    url: '/contacts/:id',
+    summary: 'Edita a conta: nome, telefone, e-mail, segmento, cidade e natureza (conta do ERP: o nome vem do sistema de origem); auditado',
+    tag: 'Clientes',
+    module: 'clientes',
+    params: IdParams,
+    body: z.object({
+      name: z.string().trim().min(2, 'Informe ao menos 2 caracteres').max(160).optional(),
+      phone: z.string().trim().max(40).nullable().optional(),
+      email: z.string().trim().email('E-mail inválido').max(200).nullable().optional().or(z.literal('').transform(() => null)),
+      segment: z.enum(SEGMENTS).optional(),
+      city: z.string().trim().max(80).nullable().optional(),
+      nature: z.enum(['publica', 'privada']).nullable().optional(),
+      ownerId: z.string().uuid().optional(),
+    }),
+    handler: async ({ app, auth, params, body, req }) => app.db.transaction(async (tx) => {
+      const [c] = await tx.select().from(s.contacts).where(and(eq(s.contacts.id, params.id), scope(auth))).limit(1).for('update');
+      if (!c) throw notFound('Cliente não encontrado.');
+      if (body.name !== undefined && body.name !== c.name && c.sourceSystem !== 'crm') throw unprocessable('Conta vinda de integração: o nome é mantido pelo sistema de origem.', [{ path: 'name', message: 'Vem do ERP' }]);
+      if (body.ownerId && body.ownerId !== c.ownerId) await assertAssignableUser(tx, auth, 'clientes', body.ownerId);
+      const set: Partial<typeof s.contacts.$inferInsert> = {};
+      const from: Record<string, unknown> = {}, to: Record<string, unknown> = {};
+      for (const k of ['name', 'phone', 'email', 'segment', 'city', 'nature', 'ownerId'] as const) {
+        const v = body[k];
+        if (v === undefined) continue;
+        const nv = typeof v === 'string' ? v.trim() || null : v;
+        if ((nv ?? null) === (c[k] ?? null)) continue;
+        (set as Record<string, unknown>)[k] = nv; from[k] = c[k]; to[k] = nv;
+      }
+      if (set.name === null) throw unprocessable('Informe o nome da conta.', [{ path: 'name', message: 'Obrigatório' }]);
+      if (Object.keys(set).length) {
+        await tx.update(s.contacts).set({ ...set, updatedAt: new Date(), rowVersion: sql`${s.contacts.rowVersion} + 1` }).where(eq(s.contacts.id, c.id));
+        await audit(tx, req, { action: 'contact.update', entityType: 'contact', entityId: c.id, metadata: { from, to } });
+      }
+      const [u] = await tx.select({ id: s.contacts.id, name: s.contacts.name, phone: s.contacts.phone, email: s.contacts.email, segment: s.contacts.segment, city: s.contacts.city, nature: s.contacts.nature, ownerId: s.contacts.ownerId }).from(s.contacts).where(eq(s.contacts.id, c.id));
+      return u!;
+    }),
+  }),
+
+  defineRoute({
+    method: 'DELETE',
+    url: '/contacts/:id',
+    summary: 'Exclui a conta cadastrada por engano (sem oportunidade, contrato ou registro do ERP); auditado',
+    tag: 'Clientes',
+    module: 'clientes',
+    params: IdParams,
+    handler: async ({ app, auth, params, req }) => app.db.transaction(async (tx) => {
+      const [c] = await tx.select().from(s.contacts).where(and(eq(s.contacts.id, params.id), scope(auth))).limit(1).for('update');
+      if (!c) throw notFound('Cliente não encontrado.');
+      if (level(auth, 'clientes') === 'proprio' && c.ownerId !== auth.userId) throw forbidden('Só o responsável pela conta (ou quem tem nível maior em Clientes) exclui a conta.');
+      if (c.sourceSystem !== 'crm') throw unprocessable('Conta vinda de integração (ERP): não pode ser excluída aqui.');
+      const [[o], [k], [cu]] = await Promise.all([
+        tx.select({ n: sql<number>`count(*)::int` }).from(s.opportunities).where(and(eq(s.opportunities.contactId, c.id), isNull(s.opportunities.deletedAt))),
+        tx.select({ n: sql<number>`count(*)::int` }).from(s.contracts).where(eq(s.contracts.contactId, c.id)),
+        tx.select({ n: sql<number>`count(*)::int` }).from(s.customers).where(eq(s.customers.contactId, c.id)),
+      ]);
+      const why = [o!.n ? `${o!.n} oportunidade(s)` : '', k!.n ? `${k!.n} contrato(s)` : '', cu!.n ? 'cliente ativo no ERP' : ''].filter(Boolean);
+      if (why.length) throw unprocessable(`A conta tem ${why.join(', ')}: não pode ser excluída. Edite os dados que estiverem errados.`);
+      await tx.update(s.contacts).set({ deletedAt: new Date(), updatedAt: new Date(), rowVersion: sql`${s.contacts.rowVersion} + 1` }).where(eq(s.contacts.id, c.id));
+      await audit(tx, req, { action: 'contact.delete', entityType: 'contact', entityId: c.id, metadata: { name: c.name } });
+      return { ok: true };
+    }),
+  }),
+
   defineRoute({
     method: 'GET',
     url: '/contacts',
@@ -157,6 +222,7 @@ export const contactRoutes = [
           email: s.contacts.email,
           segment: s.contacts.segment,
           city: s.contacts.city,
+          nature: s.contacts.nature,
           isProvisional: s.contacts.isProvisional,
           custom: s.contacts.custom,
           createdAt: s.contacts.createdAt,
