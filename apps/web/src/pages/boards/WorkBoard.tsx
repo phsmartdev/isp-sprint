@@ -23,6 +23,8 @@ import { errMsg } from '../../features/contracts/shared';
 import { TaskDrawer } from '../../features/tasks/TaskDrawer';
 import { CapacityModal, CloseModal, PlannerModal, usePlan, type Plan } from '../../features/boards/SprintPlanner';
 import { NewTaskDialog } from '../../features/tasks/shared';
+import { FuraFilaAnalysisModal, FuraFilaListModal } from '../../features/boards/FuraFila';
+import { useAuth } from '../../auth/AuthProvider';
 
 type Item = {
   id: string; ref: string; title: string; type: string; status: string; column: BoardColumn; rowVersion: number; ownerId: string; ownerName: string | null; priority: string;
@@ -47,9 +49,10 @@ const hours = (m: number) => fmtMinutes(m) || '0h';
 export function WorkBoardPage() {
   const board = useLocation().pathname.split('/')[2] ?? 'comercial';
   const key = (BOARD_KEYS as readonly string[]).includes(board) ? (board as BoardKey) : 'comercial';
-  const [u, setU] = useUrlState({ view: 'todas', week: '', q: '', owner: '', origin: '', cat: '', prio: '', blocked: '' });
+  const [u, setU] = useUrlState({ view: 'todas', week: '', q: '', owner: '', origin: '', cat: '', prio: '', blocked: '', furafila: '' });
+  const { me } = useAuth();
   const [open, setOpen] = useState<string | null>(null);
-  const [modal, setModal] = useState<'planejar' | 'encerrar' | 'capacidade' | null>(null);
+  const [modal, setModal] = useState<'planejar' | 'encerrar' | 'capacidade' | 'furafilas' | null>(null);
   const [creating, setCreating] = useState(false);
   const nav = useNavigate();
   const q = useQuery({
@@ -78,6 +81,7 @@ export function WorkBoardPage() {
             {leads && p && st !== 'andamento' && st !== 'encerrada' && <Button icon={<CalendarRange className="h-4 w-4" />} onClick={() => setModal('planejar')}>Planejar Sprint</Button>}
             {leads && p && st === 'planejamento' && <Button variant="primary" onClick={() => setModal('planejar')}>Abrir Sprint</Button>}
             {leads && p && st === 'andamento' && <Button onClick={() => setModal('planejar')}>Ver o compromisso</Button>}
+            {p && st === 'andamento' && <Button icon={<Zap className="h-4 w-4" />} onClick={() => setModal('furafilas')}>Fura-fila{p.furaFilaPending ? ` (${p.furaFilaPending})` : ''}</Button>}
             {leads && p && st === 'andamento' && <Button onClick={() => setModal('encerrar')}>Encerrar Sprint</Button>}
             <Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => setCreating(true)}>Nova tarefa</Button>
           </div>
@@ -86,7 +90,7 @@ export function WorkBoardPage() {
       {q.isError ? <ErrorState error={q.error} onRetry={() => q.refetch()} /> : !d ? <div className="card"><LoadingRows rows={8} /></div> : (
         <>
           {d.board.teamIds.length === 0 && <p className="border-l-4 border-l-[#B45309] bg-[#FFF7E6] px-3 py-2 text-sm text-ink">Este quadro ainda não tem equipes. A gestão do departamento ou o administrador define as equipes em Configurações → Quadros de Tarefas; até lá aparecem só as tarefas enviadas para cá.</p>}
-          <Summary d={d} p={p} />
+          <Summary d={d} p={p} onFuraFilas={p?.sprint?.status === 'andamento' ? () => setModal('furafilas') : undefined} />
           <div className="flex flex-wrap items-end gap-2">
             <div className="relative w-56"><Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted" aria-hidden /><Input aria-label="Buscar tarefas" className="pl-8" value={u.q} onChange={(e) => setU({ q: e.target.value })} placeholder="Buscar tarefa" /></div>
             <Select aria-label="Responsável" className="w-48" value={u.view === 'minhas' ? 'eu' : u.owner} onChange={(e) => (e.target.value === 'eu' ? setU({ view: 'minhas', owner: '' }) : setU({ owner: e.target.value, view: u.view === 'minhas' ? 'todas' : u.view }))}><option value="">Todas as pessoas</option><option value="eu">Minhas e que acompanho</option>{d.owners.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</Select>
@@ -107,6 +111,8 @@ export function WorkBoardPage() {
       {modal === 'planejar' && p && <PlannerModal board={key} plan={p} onClose={() => setModal(null)} />}
       {modal === 'encerrar' && p?.sprint && <CloseModal board={key} sprintId={p.sprint.id} onClose={() => setModal(null)} />}
       {modal === 'capacidade' && d && <CapacityModal board={key} week={d.week} leads={leads} onClose={() => setModal(null)} />}
+      {modal === 'furafilas' && p?.sprint && <FuraFilaListModal board={key} plan={p} onClose={() => setModal(null)} onOpen={(id) => { setModal(null); setU({ furafila: id }); }} />}
+      {u.furafila && me && <FuraFilaAnalysisModal board={key} rid={u.furafila} meId={me.user.id} onClose={() => { setU({ furafila: '' }); void plan.refetch(); void q.refetch(); }} />}
     </div>
   );
 }
@@ -114,17 +120,18 @@ export function WorkBoardPage() {
 const fmtDayMonth = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
 const CAT_DOT: Record<CapacityCategory, string> = { comercial: 'bg-primary', interno: 'bg-[#0F766E]', hipotese: 'bg-[#B45309]' };
 
-function Stat({ label, value, tone, icon }: { label: string; value: number; tone: 'danger' | 'warn' | 'soft' | 'ok'; icon?: React.ReactNode }) {
+function Stat({ label, value, tone, icon, onClick }: { label: string; value: number; tone: 'danger' | 'warn' | 'soft' | 'ok'; icon?: React.ReactNode; onClick?: () => void }) {
+  const Tag = onClick ? 'button' : 'div';
   return (
-    <div className={clsx('card p-4', tone === 'danger' && 'border-danger/50 bg-danger-soft', tone === 'warn' && 'border-[#B45309]/40 bg-[#FFF7E6]')}>
+    <Tag type={onClick ? 'button' : undefined} onClick={onClick} className={clsx('card p-4 text-left', onClick && 'hover:border-primary', tone === 'danger' && 'border-danger/50 bg-danger-soft', tone === 'warn' && 'border-[#B45309]/40 bg-[#FFF7E6]')}>
       <p className="flex items-center gap-1.5 text-xs font-semibold text-muted">{icon}{label}</p>
       <p className={clsx('num mt-1 text-3xl font-bold', tone === 'danger' ? 'text-danger' : tone === 'warn' ? 'text-[#92400E]' : 'text-ink')}>{value}</p>
-    </div>
+    </Tag>
   );
 }
 
 /** Resumo em cima do quadro, no mesmo formato do Quadro do Marketing; esforço em horas estimadas, nunca contagem. */
-function Summary({ d, p }: { d: Data; p: Plan | undefined }) {
+function Summary({ d, p, onFuraFilas }: { d: Data; p: Plan | undefined; onFuraFilas?: () => void }) {
   const k = d.kpis;
   const w = k.week;
   const pct = w.plannedMinutes ? Math.round((w.doneMinutes / w.plannedMinutes) * 100) : 0;
@@ -146,7 +153,7 @@ function Summary({ d, p }: { d: Data; p: Plan | undefined }) {
       <Stat label="Atrasadas" value={k.overdue} tone={k.overdue ? 'danger' : 'ok'} icon={<AlarmClock className="h-4 w-4" />} />
       <Stat label="Vencem hoje" value={k.dueToday} tone={k.dueToday ? 'warn' : 'ok'} />
       <Stat label="Vencem em 2 dias" value={k.dueSoon} tone={k.dueSoon ? 'soft' : 'ok'} />
-      <Stat label="Fura-filas" value={p?.furaFilas ?? 0} tone={p?.furaFilas ? 'soft' : 'ok'} icon={<Zap className="h-4 w-4" />} />
+      <Stat label={p?.furaFilaPending ? `Fura-filas · ${p.furaFilaPending} aguardando` : 'Fura-filas'} value={p?.furaFilas ?? 0} tone={p?.furaFilaPending ? 'warn' : p?.furaFilas ? 'soft' : 'ok'} icon={<Zap className="h-4 w-4" />} onClick={onFuraFilas} />
       <div className="card p-4" aria-label="Esforço da Sprint">
         <p className="text-xs font-semibold text-muted">Esforço da Sprint (meta {d.policy.comercial / 100} · {d.policy.interno / 100} · {d.policy.hipotese / 100})</p>
         <div className="mt-2 flex h-3 w-full overflow-hidden bg-line" aria-hidden>{total ? CAPACITY_CATEGORIES.map((c) => <div key={c} className={CAT_DOT[c]} style={{ width: `${(w.distribution[c] / total) * 100}%` }} />) : null}</div>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { boardColumn, boardOfTask, taskCategory, taskOrigin, weekStart } from './workBoards';
+import { analyzeFuraFila, boardColumn, boardOfTask, taskCategory, taskOrigin, weekStart, type FuraFilaCandidate } from './workBoards';
 
 describe('Quadro de Tarefas: regras', () => {
   it('origem preservada pelo registro de origem', () => {
@@ -55,5 +55,54 @@ describe('capacidade semanal', () => {
   it('meta 70/20/10 e pendências para comprometer', () => {
     expect(categoryTargets(6000, { comercial: 7000, interno: 2000, hipotese: 1000 })).toEqual({ comercial: 4200, interno: 1200, hipotese: 600 });
     expect(commitIssues({ ownerId: 'a', category: null, estimateMinutes: 0 })).toEqual(['sem categoria', 'sem esforço estimado']);
+  });
+});
+
+describe('fura-fila: ordem de consumo (exemplos da especificação, Sprint de 100h sem nada executado)', () => {
+  const h = (n: number) => n * 60;
+  // 70h comercial (7×10h), 20h interno (2×10h), 10h hipótese (2×5h)
+  const cands: FuraFilaCandidate[] = [
+    ...Array.from({ length: 7 }, (_, k) => ({ id: `c${k}`, category: 'comercial' as const, remainingMinutes: h(10), protectedCommitment: false, done: false })),
+    { id: 'i0', category: 'interno', remainingMinutes: h(10), protectedCommitment: false, done: false },
+    { id: 'i1', category: 'interno', remainingMinutes: h(10), protectedCommitment: false, done: false },
+    { id: 'h0', category: 'hipotese', remainingMinutes: h(5), protectedCommitment: false, done: false },
+    { id: 'h1', category: 'hipotese', remainingMinutes: h(5), protectedCommitment: false, done: false },
+  ];
+  it('A — 8h: só hipóteses, preserva internas e comercial', () => {
+    const a = analyzeFuraFila({ neededMinutes: h(8), freeMinutes: 0, candidates: cands });
+    expect(a.suggestedIds.sort()).toEqual(['h0', 'h1']);
+    expect(a).toMatchObject({ sufficient: true, requiresManagerApproval: false, issues: [] });
+    expect(a.selected).toEqual({ hipotese: h(10), interno: 0, comercial: 0 });
+  });
+  it('B — 15h: hipóteses e internas, preserva o comercial', () => {
+    const a = analyzeFuraFila({ neededMinutes: h(15), freeMinutes: 0, candidates: cands });
+    expect(a.selected.comercial).toBe(0);
+    expect(a.selected.hipotese).toBe(h(10));
+    expect(a.selected.interno).toBeGreaterThan(0);
+    expect(a).toMatchObject({ sufficient: true, requiresManagerApproval: false });
+  });
+  it('C — 35h: chega ao comercial e exige aprovação da gerência', () => {
+    const a = analyzeFuraFila({ neededMinutes: h(35), freeMinutes: 0, candidates: cands });
+    expect(a.selected).toMatchObject({ hipotese: h(10), interno: h(20) });
+    expect(a.selected.comercial).toBeGreaterThan(0);
+    expect(a).toMatchObject({ sufficient: true, requiresManagerApproval: true, issues: [] });
+  });
+  it('capacidade livre primeiro: nada é deslocado', () => {
+    const a = analyzeFuraFila({ neededMinutes: h(4), freeMinutes: h(6), candidates: cands });
+    expect(a).toMatchObject({ freeUsedMinutes: h(4), toRecoverMinutes: 0, suggestedIds: [], sufficient: true });
+    expect(analyzeFuraFila({ neededMinutes: h(4), freeMinutes: h(6), candidates: cands, selectedIds: ['h0'] }).issues[0]).toContain('capacidade livre');
+  });
+  it('pular a ordem é recusado; protegido e concluído não entram', () => {
+    expect(analyzeFuraFila({ neededMinutes: h(8), freeMinutes: 0, candidates: cands, selectedIds: ['c0'] }).issues.join()).toContain('Ordem de consumo');
+    const prot = cands.map((c) => (c.id === 'h0' ? { ...c, protectedCommitment: true } : c.id === 'h1' ? { ...c, done: true } : c));
+    const a = analyzeFuraFila({ neededMinutes: h(8), freeMinutes: 0, candidates: prot });
+    expect(a.recoverable.hipotese).toBe(0);
+    expect(a.suggestedIds).toEqual(['i0']);
+    expect(a.blocked.map((b) => b.id).sort()).toEqual(['h0', 'h1']);
+    expect(analyzeFuraFila({ neededMinutes: h(8), freeMinutes: 0, candidates: prot, selectedIds: ['h0'] }).issues.join()).toContain('protegido');
+  });
+  it('sem capacidade suficiente: fica aguardando decisão', () => {
+    const a = analyzeFuraFila({ neededMinutes: h(200), freeMinutes: 0, candidates: cands });
+    expect(a.sufficient).toBe(false);
   });
 });

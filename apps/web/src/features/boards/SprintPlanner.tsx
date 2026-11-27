@@ -31,7 +31,7 @@ type Person = { userId: string; name: string; allocationBp: number; netMinutes: 
 export type Plan = {
   week: string; today: string; role: 'gestao' | 'lideranca' | 'colaborador'; policy: Record<CapacityCategory, number> & { version: number };
   sprint: { id: string; status: SprintStatus; objective: string | null; openedAt: string | null } | null;
-  weeks: { week: string; status: SprintStatus | null }[]; furaFilas: number;
+  weeks: { week: string; status: SprintStatus | null }[]; furaFilas: number; furaFilaPending: number;
   capacity: { totalNetMinutes: number; selectedMinutes: number; availableMinutes: number; targets: Record<CapacityCategory, number>; distribution: Record<CapacityCategory, number>; deviationPp: number; tolerancePp: number; people: Person[]; withoutSchedule: string[] };
   tasks: PlanTask[];
 };
@@ -197,7 +197,7 @@ function RemoveModal({ board, sprintId, task, onClose }: { board: BoardKey; spri
 type Closing = {
   original: { tasks: number; minutes: number; deliveredMinutes: number; deliveredTasks: number }; revised: { tasks: number; minutes: number; deliveredMinutes: number; deliveredTasks: number };
   replanned: { title: string; minutes: number; reason: string | null }[]; furaFilas: { title: string; minutes: number }[]; notDelivered: { title: string; minutes: number }[];
-  impediments: { title: string; waitingOn: string | null }[]; finalDistribution: Record<CapacityCategory, number>;
+  impediments: { title: string; waitingOn: string | null }[]; finalDistribution: Record<CapacityCategory, number>; displacedByFuraFila?: Record<CapacityCategory, number>;
 };
 export function CloseModal({ board, sprintId, onClose }: { board: BoardKey; sprintId: string; onClose: () => void }) {
   const qc = useQueryClient();
@@ -225,6 +225,7 @@ export function CloseModal({ board, sprintId, onClose }: { board: BoardKey; spri
             <tr><td className="font-semibold">Plano revisado</td><td className="num">{result.revised.tasks} · {h(result.revised.minutes)}</td><td className="num">{result.revised.deliveredTasks} · {h(result.revised.deliveredMinutes)}</td><td className="num">{pct(result.revised.deliveredMinutes, result.revised.minutes)}</td></tr>
           </tbody></table>
           <p>Entregue por categoria: {CAPACITY_CATEGORIES.map((c) => `${CAPACITY_CATEGORY_LABELS[c]} ${h(result.finalDistribution[c])}`).join(' · ')}</p>
+          {result.displacedByFuraFila && CAPACITY_CATEGORIES.some((c) => result.displacedByFuraFila![c] > 0) && <p>Deslocado por fura-filas: {CAPACITY_CATEGORIES.map((c) => `${CAPACITY_CATEGORY_LABELS[c]} ${h(result.displacedByFuraFila![c])}`).join(' · ')}{result.displacedByFuraFila.comercial > 0 ? ' (o deslocamento do comercial teve aprovação da gerência)' : ''}</p>}
           {[['Não entregues (voltaram para as pendentes)', result.notDelivered], ['Retiradas durante a semana', result.replanned], ['Entraram por fura-fila', result.furaFilas]].map(([label, list]) => (list as { title: string; minutes: number; reason?: string | null }[]).length > 0 && (
             <div key={label as string}><h4 className="font-bold text-ink">{label as string}</h4><ul className="list-disc pl-5">{(list as { title: string; minutes: number; reason?: string | null }[]).map((x, i) => <li key={i}>{x.title} ({h(x.minutes)}){x.reason ? ` · ${x.reason}` : ''}</li>)}</ul></div>
           ))}
