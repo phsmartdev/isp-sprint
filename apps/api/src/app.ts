@@ -63,6 +63,7 @@ import { bidGovernanceRoutes } from './routes/bidGovernance';
 import { taskRoutes } from './routes/tasks';
 import { workBoardRoutes } from './routes/workBoards';
 import { workSprintRoutes } from './routes/workSprints';
+import { workFuraFilaRoutes } from './routes/workFuraFila';
 import { performanceRoutes } from './routes/performance';
 import { indicatorRoutes } from './routes/indicators';
 import { resultsRoutes } from './routes/results';
@@ -286,6 +287,7 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
     ...taskRoutes,
     ...workBoardRoutes,
     ...workSprintRoutes,
+    ...workFuraFilaRoutes,
     ...performanceRoutes,
     ...indicatorRoutes,
     ...resultsRoutes,

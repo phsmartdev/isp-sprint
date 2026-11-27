@@ -23,8 +23,11 @@ test('quadro do Comercial, envio ao Sucesso do Cliente e acompanhamento em Envia
   expect((await api.put('/api/v1/admin/modules/crm', { data: { enabled: true, mode: 'todos', disabledFeatures: disabled, note: 'Teste: liga os quadros de tarefas' } })).ok()).toBe(true);
   const lk = await (await api.get('/api/v1/meta/lookups')).json();
   const team = (n: string) => lk.teams.find((t: { name: string }) => t.name === n).id;
-  expect((await api.put('/api/v1/quadros/comercial/config', { data: { teamIds: [team('Residencial')], wipLimit: 3, wipCountsWaiting: false } })).ok()).toBe(true);
-  expect((await api.put('/api/v1/quadros/sucesso_cliente/config', { data: { teamIds: [team('Empresarial')], wipLimit: 3, wipCountsWaiting: false } })).ok()).toBe(true);
+  // configura só o que ainda não está (depois de configurado, só a gestão do quadro reconfigura)
+  const cfg = (await (await api.get('/api/v1/quadros')).json()).items as { key: string; teamIds: string[] }[];
+  for (const [key, name] of [['comercial', 'Residencial'], ['sucesso_cliente', 'Empresarial']] as const)
+    if (!cfg.find((b) => b.key === key)?.teamIds.includes(team(name)))
+      expect((await api.put(`/api/v1/quadros/${key}/config`, { data: { teamIds: [team(name)], wipLimit: 3, wipCountsWaiting: false } })).ok()).toBe(true);
 
   await login(page, 'lucas@yepnet.test');
   const t = await (await page.request.post('/api/v1/tasks', { data: { title: `Plano de acompanhamento fictício ${st}` } })).json();

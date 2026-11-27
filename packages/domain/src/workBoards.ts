@@ -140,3 +140,83 @@ export function commitIssues(t: { ownerId: string | null; category: CapacityCate
 export const SPRINT_STATUSES = ['planejamento', 'andamento', 'encerrada', 'cancelada'] as const;
 export type SprintStatus = (typeof SPRINT_STATUSES)[number];
 export const SPRINT_STATUS_LABELS: Record<SprintStatus, string> = { planejamento: 'Em planejamento', andamento: 'Em andamento', encerrada: 'Encerrada', cancelada: 'Cancelada' };
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Fura-fila (Etapa 6): ordem obrigatória de consumo — capacidade livre → 10% hipóteses → 20% internas → 70% comercial.
+// A camada comercial só pode ser usada quando as anteriores não bastam, e exige aprovação da gerência.
+// ---------------------------------------------------------------------------------------------------------------------
+/** ordem em que a capacidade comprometida é liberada */
+export const FURA_FILA_ORDER: readonly CapacityCategory[] = ['hipotese', 'interno', 'comercial'];
+export const FURA_FILA_STATUSES = ['pendente', 'ajustes', 'aguardando_gerencia', 'aprovada', 'rejeitada', 'mantida_backlog', 'cancelada'] as const;
+export type FuraFilaStatus = (typeof FURA_FILA_STATUSES)[number];
+export const FURA_FILA_STATUS_LABELS: Record<FuraFilaStatus, string> = {
+  pendente: 'Aguardando a liderança', ajustes: 'Ajustes solicitados', aguardando_gerencia: 'Aguardando aprovação da gerência',
+  aprovada: 'Incluída na Sprint', rejeitada: 'Rejeitada', mantida_backlog: 'Mantida no backlog', cancelada: 'Cancelada',
+};
+
+export type FuraFilaCandidate = { id: string; category: CapacityCategory | null; remainingMinutes: number; protectedCommitment: boolean; done: boolean };
+export type FuraFilaInput = { neededMinutes: number; freeMinutes: number; candidates: FuraFilaCandidate[]; selectedIds?: string[] };
+export type FuraFilaAnalysis = {
+  neededMinutes: number; freeUsedMinutes: number; toRecoverMinutes: number;
+  /** liberável por camada (sem concluídas e sem compromissos protegidos) */
+  recoverable: Record<CapacityCategory, number>;
+  /** sugestão na ordem obrigatória (tarefas inteiras) */
+  suggestedIds: string[];
+  /** o que a seleção libera, por camada */
+  selected: Record<CapacityCategory, number>; selectedMinutes: number;
+  sufficient: boolean; requiresManagerApproval: boolean;
+  /** quebras da regra de ordem ou da seleção (bloqueiam a autorização) */
+  issues: string[];
+  /** por que uma tarefa não pode ser deslocada */
+  blocked: { id: string; reason: string }[];
+};
+
+export function analyzeFuraFila(i: FuraFilaInput): FuraFilaAnalysis {
+  const needed = Math.max(0, Math.round(i.neededMinutes));
+  const freeUsed = Math.min(Math.max(0, i.freeMinutes), needed);
+  const toRecover = needed - freeUsed;
+  const blocked: { id: string; reason: string }[] = [];
+  const eligible = i.candidates.filter((c) => {
+    if (c.done) { blocked.push({ id: c.id, reason: 'já concluída: horas executadas não voltam' }); return false; }
+    if (c.protectedCommitment) { blocked.push({ id: c.id, reason: 'compromisso protegido (prazo legal, contratual ou crítico)' }); return false; }
+    if (!c.category) { blocked.push({ id: c.id, reason: 'sem categoria' }); return false; }
+    if (c.remainingMinutes <= 0) { blocked.push({ id: c.id, reason: 'sem esforço restante' }); return false; }
+    return true;
+  });
+  const zero = (): Record<CapacityCategory, number> => ({ comercial: 0, interno: 0, hipotese: 0 });
+  const recoverable = zero();
+  for (const c of eligible) recoverable[c.category!] += c.remainingMinutes;
+  // sugestão: camada a camada; dentro da camada, as maiores primeiro (menos tarefas deslocadas)
+  const suggestedIds: string[] = [];
+  let left = toRecover;
+  for (const cat of FURA_FILA_ORDER) {
+    if (left <= 0) break;
+    for (const c of eligible.filter((x) => x.category === cat).sort((a, b) => b.remainingMinutes - a.remainingMinutes)) {
+      if (left <= 0) break;
+      suggestedIds.push(c.id);
+      left -= c.remainingMinutes;
+    }
+  }
+  const selIds = new Set(i.selectedIds ?? suggestedIds);
+  const issues: string[] = [];
+  for (const id of selIds) {
+    if (!i.candidates.some((c) => c.id === id)) issues.push('Tarefa selecionada fora da Sprint.');
+    else if (!eligible.some((c) => c.id === id)) issues.push(`Tarefa selecionada não pode ser deslocada: ${blocked.find((b) => b.id === id)?.reason ?? ''}.`);
+  }
+  const chosen = eligible.filter((c) => selIds.has(c.id));
+  const selected = zero();
+  for (const c of chosen) selected[c.category!] += c.remainingMinutes;
+  const selectedMinutes = chosen.reduce((t, c) => t + c.remainingMinutes, 0);
+  // ordem obrigatória: só passa para a camada seguinte quando a anterior foi toda usada
+  FURA_FILA_ORDER.forEach((cat, n) => {
+    if (n === 0 || !selected[cat]) return;
+    for (const prev of FURA_FILA_ORDER.slice(0, n))
+      if (selected[prev] < recoverable[prev]) issues.push(`Ordem de consumo: use antes toda a capacidade liberável de ${prev === 'hipotese' ? 'testes de hipóteses' : 'atividades internas'}.`);
+  });
+  if (toRecover === 0 && selectedMinutes > 0) issues.push('Há capacidade livre suficiente: nenhuma tarefa precisa ser deslocada.');
+  const sufficient = freeUsed + selectedMinutes >= needed;
+  return {
+    neededMinutes: needed, freeUsedMinutes: freeUsed, toRecoverMinutes: toRecover, recoverable, suggestedIds, selected, selectedMinutes,
+    sufficient, requiresManagerApproval: selected.comercial > 0, issues: [...new Set(issues)], blocked,
+  };
+}

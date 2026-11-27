@@ -24,11 +24,11 @@ import { dueAtOf } from '../services/projects';
 import { activityScope } from '../services/tasks';
 import { assertBoardOpen, boardRole, boardsConfig, capacityPolicy, teamsByUser, ymd } from './workBoards';
 
-const Board = z.object({ board: z.enum(BOARD_KEYS) });
-const isoDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
-const addDays = (iso: string, n: number) => { const d = new Date(`${iso}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+export const Board = z.object({ board: z.enum(BOARD_KEYS) });
+export const isoDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+export const addDays = (iso: string, n: number) => { const d = new Date(`${iso}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
 
-async function context(db: DbOrTx, auth: AuthContext, board: BoardKey) {
+export async function context(db: DbOrTx, auth: AuthContext, board: BoardKey) {
   assertBoardOpen(auth, board);
   const boards = await boardsConfig(db, auth.tenantId);
   const cfg = boards.find((b) => b.key === board)!;
@@ -37,7 +37,7 @@ async function context(db: DbOrTx, auth: AuthContext, board: BoardKey) {
   const members = [...byUser.entries()].filter(([, ts]) => ts.some((t) => cfg.teamIds.includes(t))).map(([u]) => u);
   return { boards, cfg, role, byUser, members };
 }
-const assertLeads = (role: string) => { if (role === 'colaborador') throw forbidden('Planejar a semana e abrir ou encerrar a Sprint é da liderança ou da gestão deste time.'); };
+export const assertLeads = (role: string) => { if (role === 'colaborador') throw forbidden('Planejar a semana e abrir ou encerrar a Sprint é da liderança ou da gestão deste time.'); };
 
 /** Capacidade líquida de cada pessoa do departamento na semana (null = sem jornada cadastrada). */
 export async function peopleCapacity(db: DbOrTx, tenantId: string, board: BoardKey, week: string, members: string[], byUser: Map<string, string[]>, boards: { key: BoardKey; teamIds: string[] }[]) {
@@ -61,7 +61,7 @@ export async function peopleCapacity(db: DbOrTx, tenantId: string, board: BoardK
 }
 
 /** Tarefas abertas do quadro (candidatas ao planejamento), com o contexto comercial que existir no CRM. */
-async function boardOpenTasks(db: DbOrTx, auth: AuthContext, board: BoardKey, ctx: Awaited<ReturnType<typeof context>>, extra?: SQL) {
+export async function boardOpenTasks(db: DbOrTx, auth: AuthContext, board: BoardKey, ctx: Awaited<ReturnType<typeof context>>, extra?: SQL) {
   const owner = alias(s.users, 'owner');
   const oppOwner = alias(s.users, 'opp_owner');
   const rows = await db.select({
@@ -83,12 +83,12 @@ async function sprintOf(db: DbOrTx, tenantId: string, board: BoardKey, week: str
   const [sp] = await db.select().from(s.workSprints).where(and(eq(s.workSprints.tenantId, tenantId), eq(s.workSprints.boardKey, board), eq(s.workSprints.weekStart, week), sql`${s.workSprints.status} <> 'cancelada'`)).limit(1);
   return sp ?? null;
 }
-async function loadSprint(db: DbOrTx, auth: AuthContext, board: BoardKey, id: string) {
+export async function loadSprint(db: DbOrTx, auth: AuthContext, board: BoardKey, id: string) {
   const [sp] = await db.select().from(s.workSprints).where(and(eq(s.workSprints.id, id), eq(s.workSprints.tenantId, auth.tenantId), eq(s.workSprints.boardKey, board))).limit(1);
   if (!sp) throw notFound('Sprint não encontrada.');
   return sp;
 }
-const sprintEvent = (db: DbOrTx, auth: AuthContext, sprintId: string, type: string, payload: Record<string, unknown> = {}, reason?: string | null) =>
+export const sprintEvent = (db: DbOrTx, auth: AuthContext, sprintId: string, type: string, payload: Record<string, unknown> = {}, reason?: string | null) =>
   db.insert(s.workSprintEvents).values({ tenantId: auth.tenantId, sprintId, type, payload, reason: reason ?? null, actorId: auth.userId });
 
 /** Distribuição do esforço por categoria e desvio (pontos percentuais) em relação à diretriz. */
@@ -133,6 +133,7 @@ export const workSprintRoutes = [
       });
       const selected = tasks.filter((t) => t.selected);
       const furaFilas = sprint ? (await app.db.select({ n: sql<number>`count(*)::int` }).from(s.workSprintItems).where(and(eq(s.workSprintItems.sprintId, sprint.id), eq(s.workSprintItems.entry, 'fura_fila'), isNull(s.workSprintItems.removedAt))))[0]?.n ?? 0 : 0;
+      const furaFilaPending = sprint ? (await app.db.select({ n: sql<number>`count(*)::int` }).from(s.workSprintRequests).where(and(eq(s.workSprintRequests.sprintId, sprint.id), inArray(s.workSprintRequests.status, ['pendente', 'ajustes', 'aguardando_gerencia']))))[0]?.n ?? 0 : 0;
       // seletor do cabeçalho: Sprints já criadas + a semana atual e a próxima
       const known = await app.db.select({ weekStart: s.workSprints.weekStart, status: s.workSprints.status }).from(s.workSprints)
         .where(and(eq(s.workSprints.tenantId, auth.tenantId), eq(s.workSprints.boardKey, board), sql`${s.workSprints.status} <> 'cancelada'`)).orderBy(desc(s.workSprints.weekStart)).limit(20);
@@ -143,7 +144,7 @@ export const workSprintRoutes = [
       const byPerson = people.map((p) => { const c = selected.filter((t) => t.ownerId === p.userId).reduce((t, x) => t + committed(x), 0); return { ...p, committedMinutes: c, overload: p.netMinutes === null ? c > 0 : c > p.netMinutes }; });
       const dist = distribution(selected.map((t) => ({ category: t.category, minutes: committed(t) })), policy);
       return {
-        week, today, role: ctx.role, board: { key: board, label: BOARD_LABELS[board] }, policy, weeks, furaFilas, sprint: sprint && { id: sprint.id, status: sprint.status, objective: sprint.objective, openedAt: sprint.openedAt },
+        week, today, role: ctx.role, board: { key: board, label: BOARD_LABELS[board] }, policy, weeks, furaFilas, furaFilaPending, sprint: sprint && { id: sprint.id, status: sprint.status, objective: sprint.objective, openedAt: sprint.openedAt },
         capacity: { totalNetMinutes: totalNet, selectedMinutes: dist.total, availableMinutes: totalNet - dist.total, targets: categoryTargets(totalNet, policy), distribution: dist.by, deviationPp: dist.deviationPp, tolerancePp: DEVIATION_TOLERANCE_PP, people: byPerson, withoutSchedule: byPerson.filter((p) => p.netMinutes === null).map((p) => p.name) },
         tasks,
       };
@@ -282,6 +283,8 @@ export const workSprintRoutes = [
           notDelivered: active.filter((x) => x.status !== 'concluida').map((x) => ({ activityId: x.i.activityId, title: x.title, minutes: x.i.committedMinutes, category: x.i.category })),
           impediments: active.filter((x) => x.status === 'aguardando').map((x) => ({ title: x.title, waitingOn: x.waitingOn })),
           finalDistribution: Object.fromEntries(CAPACITY_CATEGORIES.map((c) => [c, active.filter((x) => x.status === 'concluida' && x.i.category === c).reduce((t, x) => t + x.i.committedMinutes, 0)])),
+          // esforço planejado que precisou sair por causa de fura-filas, por categoria (o 70% deslocado é o indicador-chave)
+          displacedByFuraFila: Object.fromEntries(CAPACITY_CATEGORIES.map((c) => [c, items.filter((x) => x.i.removedAt && x.i.requestId && x.i.category === c).reduce((t, x) => t + x.i.committedMinutes, 0)])),
           learnings: body.learnings ?? null,
         };
         // pendentes voltam a ser elegíveis (com vínculos, situação e histórico); nada vai sozinho para a próxima Sprint

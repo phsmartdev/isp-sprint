@@ -1345,6 +1345,13 @@
       "when": 1795797440159,
       "tag": "0191_capacidade_sprint",
       "breakpoints": true
+    },
+    {
+      "idx": 192,
+      "version": "7",
+      "when": 1795802986273,
+      "tag": "0192_fura_fila",
+      "breakpoints": true
     }
   ]
 }

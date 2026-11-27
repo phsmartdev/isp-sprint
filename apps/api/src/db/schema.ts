@@ -992,7 +992,44 @@ export const workSprintItems = pgTable('work_sprint_items', {
   removedAt: ts('removed_at'),
   removedBy: uuid('removed_by').references(() => users.id),
   removedReason: text('removed_reason'),
+  /** fura-fila que motivou a entrada (entry fura_fila) ou a retirada desta tarefa */
+  requestId: uuid('request_id'),
 }, (t) => ({ uq: uniqueIndex('work_sprint_items_uq').on(t.sprintId, t.activityId).where(sql`removed_at is null`), entryCk: check('work_sprint_items_entry_ck', sql`entry in ('plano','fura_fila')`) }));
+
+/**
+ * Solicitação de fura-fila: inclusão extraordinária numa Sprint aberta. Nada muda na Sprint enquanto a decisão (e, se
+ * tocar o comercial, a aprovação da gerência) não sai; a aprovação revalida a análise antes de efetivar.
+ */
+export const workSprintRequests = pgTable('work_sprint_requests', {
+  id: id(),
+  tenantId: tenantId(),
+  sprintId: uuid('sprint_id').notNull().references(() => workSprints.id),
+  activityId: uuid('activity_id').notNull().references(() => activities.id),
+  status: text('status').notNull().default('pendente'),
+  origin: text('origin').notNull(),
+  justification: text('justification').notNull(),
+  urgency: text('urgency').notNull(),
+  consequence: text('consequence').notNull(),
+  neededBy: date('needed_by', { mode: 'string' }).notNull(),
+  estimateMinutes: integer('estimate_minutes').notNull(),
+  ownerId: uuid('owner_id').notNull().references(() => users.id),
+  requestedBy: uuid('requested_by').notNull().references(() => users.id),
+  /** seleção proposta pela liderança: [{ activityId, newDueOn }] e a impressão digital da análise (para revalidar) */
+  selection: jsonb('selection').$type<{ activityId: string; newDueOn: string | null }[]>(),
+  fingerprint: text('fingerprint'),
+  analysis: jsonb('analysis').$type<Record<string, unknown>>(),
+  decidedBy: uuid('decided_by').references(() => users.id),
+  decidedAt: ts('decided_at'),
+  decisionReason: text('decision_reason'),
+  approvedBy: uuid('approved_by').references(() => users.id),
+  approvedAt: ts('approved_at'),
+  approvalReason: text('approval_reason'),
+  createdAt: createdAt(),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
+}, (t) => ({
+  idx: index('work_sprint_requests_idx').on(t.tenantId, t.sprintId, t.status),
+  statusCk: check('work_sprint_requests_status_ck', sql`status in ('pendente','ajustes','aguardando_gerencia','aprovada','rejeitada','mantida_backlog','cancelada')`),
+}));
 
 /** Histórico da Sprint (append-only): abertura, revisões do plano, retiradas, fura-filas, encerramento. */
 export const workSprintEvents = pgTable('work_sprint_events', {
