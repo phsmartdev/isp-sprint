@@ -8,7 +8,7 @@
     "start": "node --env-file=../../.env dist/server.js",
     "build": "tsup",
     "vercel:setup": "node dist/vercel-setup.js",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "node --max-old-space-size=4096 ./node_modules/typescript/bin/tsc --noEmit",
     "test": "vitest run",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx --env-file=../../.env src/db/migrate.ts",

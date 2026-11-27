@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { analyzeFuraFila, boardColumn, boardOfTask, taskCategory, taskOrigin, weekStart, type FuraFilaCandidate } from './workBoards';
+import { analyzeFuraFila, boardColumn, boardOfTask, dependencyAtRisk, dependencyState, taskCategory, taskOrigin, weekStart, type FuraFilaCandidate } from './workBoards';
 
 describe('Quadro de Tarefas: regras', () => {
   it('origem preservada pelo registro de origem', () => {
@@ -104,5 +104,18 @@ describe('fura-fila: ordem de consumo (exemplos da especificação, Sprint de 10
   it('sem capacidade suficiente: fica aguardando decisão', () => {
     const a = analyzeFuraFila({ neededMinutes: h(200), freeMinutes: 0, candidates: cands });
     expect(a.sufficient).toBe(false);
+  });
+});
+
+describe('dependências: situação e risco de atraso', () => {
+  const today = '2030-03-10';
+  it('classifica a predecessora frente ao prazo da dependente', () => {
+    expect(dependencyState({ status: 'concluida', dueDay: '2030-03-01' }, '2030-03-05', today)).toBe('concluida');
+    expect(dependencyState({ status: 'a_fazer', dueDay: '2030-03-09' }, '2030-03-20', today)).toBe('atrasada');
+    expect(dependencyState({ status: 'a_fazer', dueDay: '2030-03-20' }, '2030-03-15', today)).toBe('em_risco');
+    expect(dependencyState({ status: 'a_fazer', dueDay: '2030-03-15' }, '2030-03-15', today)).toBe('em_risco');
+    expect(dependencyState({ status: 'a_fazer', dueDay: '2030-03-12' }, '2030-03-15', today)).toBe('no_prazo');
+    expect(dependencyState({ status: 'a_fazer', dueDay: null }, '2030-03-15', today)).toBe('sem_prazo');
+    expect(dependencyAtRisk('em_risco') && dependencyAtRisk('atrasada') && !dependencyAtRisk('sem_prazo')).toBe(true);
   });
 });

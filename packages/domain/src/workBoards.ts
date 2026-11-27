@@ -220,3 +220,29 @@ export function analyzeFuraFila(i: FuraFilaInput): FuraFilaAnalysis {
     sufficient, requiresManagerApproval: selected.comercial > 0, issues: [...new Set(issues)], blocked,
   };
 }
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Dependências entre atividades (Etapa 7): situação e risco de atraso, inclusive entre departamentos.
+// Nunca muda prazo de ninguém: só sinaliza para a liderança analisar.
+// ---------------------------------------------------------------------------------------------------------------------
+export const DEPENDENCY_STATES = ['concluida', 'atrasada', 'em_risco', 'sem_prazo', 'no_prazo'] as const;
+export type DependencyState = (typeof DEPENDENCY_STATES)[number];
+export const DEPENDENCY_STATE_LABELS: Record<DependencyState, string> = {
+  concluida: 'Concluída', atrasada: 'Predecessora atrasada', em_risco: 'Em risco: termina depois do prazo da dependente', sem_prazo: 'Predecessora sem prazo', no_prazo: 'No prazo',
+};
+/**
+ * Situação de uma dependência: a predecessora (de quem se depende) frente ao prazo da dependente.
+ * - concluida: já não bloqueia;
+ * - atrasada: a predecessora venceu e não terminou;
+ * - em_risco: a predecessora vence depois do prazo da dependente (ou no mesmo dia, sem folga);
+ * - sem_prazo: a dependente tem prazo e a predecessora não (risco não medido);
+ * - no_prazo: a predecessora vence antes.
+ */
+export function dependencyState(pred: { status: string; dueDay: string | null }, dependentDueDay: string | null, today: string): DependencyState {
+  if (pred.status === 'concluida' || pred.status === 'cancelada') return 'concluida';
+  if (pred.dueDay && pred.dueDay < today) return 'atrasada';
+  if (!dependentDueDay) return pred.dueDay ? 'no_prazo' : 'sem_prazo';
+  if (!pred.dueDay) return 'sem_prazo';
+  return pred.dueDay >= dependentDueDay ? 'em_risco' : 'no_prazo';
+}
+export const dependencyAtRisk = (st: DependencyState) => st === 'atrasada' || st === 'em_risco';

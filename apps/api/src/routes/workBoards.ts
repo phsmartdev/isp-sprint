@@ -20,6 +20,7 @@ import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import { level } from '../services/scope';
 import { audit } from '../services/audit';
+import { searchBoardTasks } from '../services/dependencies';
 import { activityScope, loadTask, taskEvent } from '../services/tasks';
 import { notifyTask } from '../services/contractNotify';
 
@@ -73,6 +74,29 @@ export async function assertBoardManagement(db: DbOrTx, auth: AuthContext, t: { 
   if (role === 'colaborador') throw forbidden(`Esta tarefa foi enviada para ${BOARD_LABELS[board]}: quem planeja, distribui e muda o prazo é a liderança desse time.`);
 }
 
+/** Escopo das tarefas no quadro: liderança/gestão do quadro, todas do departamento (o filtro por equipe vem junto); demais, o perfil. */
+export function boardScope(auth: AuthContext, role: 'gestao' | 'lideranca' | 'colaborador') {
+  return role === 'colaborador' ? activityScope(auth) : and(eq(s.activities.tenantId, auth.tenantId), isNull(s.activities.deletedAt))!;
+}
+
+/**
+ * Abre a tarefa pelo perfil; se o perfil não alcança, mas a pessoa é liderança ou gestão do quadro em que a tarefa está,
+ * abre para acompanhar e planejar (o planejamento confere a alçada de novo).
+ */
+export async function loadBoardTask(db: DbOrTx, auth: AuthContext, id: string) {
+  try {
+    return await loadTask(db, auth, id);
+  } catch (e) {
+    const [t] = await db.select().from(s.activities).where(and(eq(s.activities.id, id), eq(s.activities.tenantId, auth.tenantId), isNull(s.activities.deletedAt))).limit(1);
+    if (!t) throw e;
+    const { board, boards } = await currentBoardOf(db, auth.tenantId, t);
+    if (!board) throw e;
+    try { assertBoardOpen(auth, board); } catch { throw e; }
+    if ((await boardRole(db, auth, boards.find((b) => b.key === board)!.teamIds)) === 'colaborador') throw e;
+    return { t, can: { edit: false, assign: false, approve: false, comment: true } };
+  }
+}
+
 export function assertBoardOpen(auth: AuthContext, board: BoardKey) {
   assertModuleOpen(auth, board === 'marketing' ? 'campanhas' : 'atividades', BOARD_FEATURE[board]);
   if (level(auth, 'atividades') === 'nenhum') throw forbidden('Seu perfil não tem acesso a tarefas.');
@@ -119,13 +143,18 @@ export const workBoardRoutes = [
       const today = ymd(new Date(), auth.timezone);
       const week = weekStart(query.week ?? today);
       const owner = alias(s.users, 'owner');
-      const w: SQL[] = [activityScope(auth), isNull(s.activities.parentId), sql`${s.activities.status} <> 'cancelada'`,
+      // liderança e gestão do quadro veem todas as tarefas do departamento (a especificação: tudo sob a sua responsabilidade),
+      // mesmo que o perfil geral só alcance as próprias; colaborador vê o que o perfil dele já permite
+      const w: SQL[] = [boardScope(auth, role), isNull(s.activities.parentId), sql`${s.activities.status} <> 'cancelada'`,
         or(eq(s.activities.boardKey, board), and(isNull(s.activities.boardKey), members.length ? inArray(s.activities.ownerId, members) : sql`false`))!];
       // concluídas: só com o filtro, ou as concluídas da semana escolhida (para o progresso)
       if (!query.includeDone) w.push(or(isNull(s.activities.completedAt), sql`${s.activities.completedAt} >= ${week}::date`)!);
       const rows = await app.db.select({
         a: s.activities, ownerName: owner.name, oppCode: s.opportunities.code, oppTitle: s.opportunities.title, oppValue: s.opportunities.valueCents, oppStage: s.opportunities.stage,
         contactName: s.contacts.name, contractCode: s.contracts.code, projectName: s.projects.name,
+        // dependências: predecessoras em aberto e se alguma está atrasada ou vence depois desta (sem folga)
+        depOpen: sql<number>`(select count(*)::int from activity_dependencies d join activities p on p.id = d.depends_on_id where d.activity_id = ${s.activities.id} and p.deleted_at is null and p.status not in ('concluida','cancelada'))`,
+        depRisk: sql<boolean>`exists (select 1 from activity_dependencies d join activities p on p.id = d.depends_on_id where d.activity_id = ${s.activities.id} and p.deleted_at is null and p.status not in ('concluida','cancelada') and (p.due_at < now() or (${s.activities.dueAt} is not null and p.due_at >= ${s.activities.dueAt})))`,
       }).from(s.activities)
         .leftJoin(owner, eq(owner.id, s.activities.ownerId))
         .leftJoin(s.opportunities, eq(s.opportunities.id, s.activities.opportunityId))
@@ -147,7 +176,7 @@ export const workBoardRoutes = [
             ownerId: a.ownerId, ownerName: r.ownerName, priority: a.priority, dueAt: a.dueAt, dueDay, agreedDueAt: a.agreedDueAt,
             category, categoryAuto: !a.capacityCategory && !!category, estimateMinutes: a.estimateMinutes, remainingMinutes: a.remainingMinutes,
             origin: taskOrigin(a), commercial: !!a.opportunityId, plannedWeek: a.plannedWeek, planned, planOrder: a.planOrder,
-            blocked: a.status === 'aguardando', waitingOn: a.waitingOn, protectedCommitment: a.protectedCommitment, observer: a.participants.includes(auth.userId), observers: a.participants.length,
+            blocked: a.status === 'aguardando', waitingOn: a.waitingOn, protectedCommitment: a.protectedCommitment, observer: a.participants.includes(auth.userId), observers: a.participants.length, depOpen: r.depOpen, depRisk: r.depRisk,
             overdue: !done && !!a.dueAt && a.dueAt.getTime() < now, dueToday: !done && dueDay === today,
             link: a.opportunityId ? { kind: 'oportunidade', label: `OP-${r.oppCode} · ${r.contactName ?? r.oppTitle ?? ''}`, to: `/opportunities/${a.opportunityId}`, valueCents: r.oppValue, stage: r.oppStage }
               : a.contractId ? { kind: 'contrato', label: `Contrato ${r.contractCode ?? ''}`, to: `/contracts/${a.contractId}` }
@@ -166,7 +195,7 @@ export const workBoardRoutes = [
           column: (c.column === 'revisao' ? 'em_revisao' : c.column) as ReturnType<typeof boardColumn>, rowVersion: c.rowVersion, ownerId: c.ownerId, ownerName, priority: c.priority,
           dueAt: c.dueOn ? new Date(`${c.dueOn}T12:00:00Z`) : null, dueDay: c.dueOn, agreedDueAt: null, category: null, categoryAuto: false, estimateMinutes: null, remainingMinutes: null,
           origin: 'marketing' as const, commercial: false, plannedWeek: null, planned: !!c.sprintId, planOrder: c.position, blocked: false, waitingOn: null, protectedCommitment: false,
-          observer: c.observerIds.includes(auth.userId), observers: c.observerIds.length, overdue: c.column !== 'concluido' && !!c.dueOn && c.dueOn < today, dueToday: c.column !== 'concluido' && c.dueOn === today,
+          observer: c.observerIds.includes(auth.userId), observers: c.observerIds.length, depOpen: 0, depRisk: false, overdue: c.column !== 'concluido' && !!c.dueOn && c.dueOn < today, dueToday: c.column !== 'concluido' && c.dueOn === today,
           link: { kind: 'marketing', label: c.furaFila ? 'Quadro do Marketing · fura-fila' : 'Quadro do Marketing', to: `/marketing/quadro?card=${c.id}`, valueCents: null, stage: null },
           readOnly: true, completedAt: c.completedAt,
         })));
@@ -185,7 +214,7 @@ export const workBoardRoutes = [
             id: a.id, ref: `T-${a.id.slice(0, 6).toUpperCase()}`, title: a.title, type: a.type, status: a.status, column: boardColumn({ status: a.status, planned: !!a.plannedWeek }), rowVersion: a.rowVersion,
             ownerId: a.ownerId, ownerName, priority: a.priority, dueAt: a.dueAt, dueDay, agreedDueAt: a.agreedDueAt, category: taskCategory(a), categoryAuto: false, estimateMinutes: a.estimateMinutes, remainingMinutes: a.remainingMinutes,
             origin: taskOrigin(a), commercial: !!a.opportunityId, plannedWeek: a.plannedWeek, planned: !!a.plannedWeek, planOrder: a.planOrder, blocked: a.status === 'aguardando', waitingOn: a.waitingOn,
-            protectedCommitment: a.protectedCommitment, observer: true, observers: a.participants.length, overdue: !done && !!a.dueAt && a.dueAt.getTime() < now, dueToday: !done && dueDay === today,
+            protectedCommitment: a.protectedCommitment, observer: true, observers: a.participants.length, depOpen: 0, depRisk: false, overdue: !done && !!a.dueAt && a.dueAt.getTime() < now, dueToday: !done && dueDay === today,
             link: { kind: 'enviada', label: `Com ${BOARD_LABELS[a.boardKey as BoardKey] ?? 'outro time'}`, to: '', valueCents: null, stage: null }, readOnly: true, completedAt: a.completedAt,
           };
         });
@@ -223,6 +252,15 @@ export const workBoardRoutes = [
       };
       const owners = [...new Map(all.map((i) => [i.ownerId, i.ownerName ?? ''])).entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
       return { board: { ...cfg, role }, week, today, policy: await capacityPolicy(app.db, auth.tenantId, board), kpis, owners, items, total: all.length };
+    },
+  }),
+
+  defineRoute({
+    method: 'GET', url: '/quadros/dependencias/busca', summary: 'Busca tarefas abertas dos quadros ligados (inclusive de outros departamentos) para usar como predecessora', tag: 'Quadro de Tarefas', anyAuthenticated: true,
+    query: z.object({ q: z.string().trim().min(2).max(100) }),
+    handler: async ({ app, auth, query }) => {
+      const open = BOARD_KEYS.filter((b) => b !== 'marketing').filter((b) => { try { assertBoardOpen(auth, b); return true; } catch { return false; } });
+      return { items: await searchBoardTasks(app.db, auth, query.q, open) };
     },
   }),
 
@@ -329,7 +367,7 @@ export const workBoardRoutes = [
     handler: async ({ app, auth, params, body }) => {
       if (level(auth, 'atividades') === 'nenhum') throw forbidden('Seu perfil não tem acesso a tarefas.');
       return app.db.transaction(async (tx) => {
-        const { t, can } = await loadTask(tx, auth, params.id);
+        const { t, can } = await loadBoardTask(tx, auth, params.id);
         // pode planejar: quem pode alterar a tarefa ou a liderança/gestão do quadro em que ela está
         if (!can.edit) {
           const { board, boards } = await currentBoardOf(tx, auth.tenantId, t);
