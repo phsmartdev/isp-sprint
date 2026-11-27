@@ -101,6 +101,13 @@ function distribution(items: { category: CapacityCategory | null; minutes: numbe
 /** desvio da diretriz acima disto exige justificativa ao abrir a Sprint */
 const DEVIATION_TOLERANCE_PP = 10;
 
+/** Aviso no sino para as pessoas do departamento (abertura e encerramento da Sprint). */
+async function notifyTeam(db: DbOrTx, auth: AuthContext, members: string[], ev: { event: string; title: string; body?: string | null; link: string; key: string }) {
+  const ids = members.filter((u) => u !== auth.userId);
+  if (!ids.length) return;
+  await db.insert(s.userNotifications).values(ids.map((userId) => ({ tenantId: auth.tenantId, userId, module: 'quadro', event: ev.event, title: ev.title.slice(0, 200), body: ev.body ?? null, link: ev.link, actorId: auth.userId, dedupeKey: `sprint:${ev.key}` }))).onConflictDoNothing();
+}
+
 export const workSprintRoutes = [
   // ------------------------------------------------------------------ Planejar Semana
   defineRoute({
@@ -235,6 +242,8 @@ export const workSprintRoutes = [
         return { tasks: items.length, minutes: dist.total };
       });
       await audit(app.db, req, { action: 'work_sprint.open', entityType: 'work_sprint', entityId: params.id, metadata: out });
+      const [opened] = await app.db.select({ weekStart: s.workSprints.weekStart, objective: s.workSprints.objective }).from(s.workSprints).where(eq(s.workSprints.id, params.id)).limit(1);
+      await notifyTeam(app.db, auth, ctx.members, { event: 'sprint_aberta', title: `Sprint aberta: ${BOARD_LABELS[board]}, semana de ${opened!.weekStart.split('-').reverse().join('/')}`, body: opened!.objective ? `Objetivo: ${opened!.objective}` : null, link: `/quadro/${board}?week=${opened!.weekStart}`, key: `${params.id}:aberta` }).catch(() => undefined);
       return { ok: true, ...out };
     },
   }),
@@ -300,6 +309,8 @@ export const workSprintRoutes = [
         return result;
       });
       await audit(app.db, req, { action: 'work_sprint.close', entityType: 'work_sprint', entityId: params.id, metadata: { original: closing.original, revised: closing.revised } });
+      const pctOf = (a: number, b: number) => (b ? `${Math.round((a / b) * 100)}%` : '—');
+      await notifyTeam(app.db, auth, ctx.members, { event: 'sprint_encerrada', title: `Sprint encerrada: ${BOARD_LABELS[board]}`, body: `Plano original entregue: ${pctOf(closing.original.deliveredMinutes, closing.original.minutes)} · revisado: ${pctOf(closing.revised.deliveredMinutes, closing.revised.minutes)}. Pendentes voltaram ao backlog.`, link: `/quadro/${board}`, key: `${params.id}:encerrada` }).catch(() => undefined);
       return { ok: true, closing };
     },
   }),
@@ -388,11 +399,12 @@ export const workSprintRoutes = [
     method: 'POST', url: '/quadros/:board/capacidade/ausencias', summary: 'Ausência, afastamento, compromisso fixo ou rotina fora das tarefas (liderança ou gestão do time)', tag: 'Quadro de Tarefas', anyAuthenticated: true,
     params: Board,
     body: z.object({ userId: z.string().uuid(), kind: z.enum(ABSENCE_KINDS), startOn: isoDay, endOn: isoDay, minutesPerDay: z.number().int().min(1).max(24 * 60).nullable().default(null), note: z.string().trim().max(300).nullable().optional() }).refine((b) => b.endOn >= b.startOn, 'O fim é antes do início.'),
-    handler: async ({ app, auth, params, body, reply }) => {
+    handler: async ({ app, auth, params, body, reply, req }) => {
       const ctx = await context(app.db, auth, params.board as BoardKey);
       assertLeads(ctx.role);
       if (!ctx.members.includes(body.userId)) throw unprocessable('Pessoa fora das equipes deste quadro.');
       const [r] = await app.db.insert(s.workAbsences).values({ tenantId: auth.tenantId, ...body, note: body.note ?? null, createdBy: auth.userId }).returning({ id: s.workAbsences.id });
+      await audit(app.db, req, { action: 'work_capacity.absence_add', entityType: 'user', entityId: body.userId, metadata: { ...body, board: params.board } });
       reply.code(201);
       return r;
     },
@@ -400,11 +412,12 @@ export const workSprintRoutes = [
   defineRoute({
     method: 'DELETE', url: '/quadros/:board/capacidade/ausencias/:id', summary: 'Retira uma ausência (fica marcada, não é apagada)', tag: 'Quadro de Tarefas', anyAuthenticated: true,
     params: Board.extend({ id: z.string().uuid() }),
-    handler: async ({ app, auth, params }) => {
+    handler: async ({ app, auth, params, req }) => {
       const ctx = await context(app.db, auth, params.board as BoardKey);
       assertLeads(ctx.role);
-      const r = await app.db.update(s.workAbsences).set({ deletedAt: new Date() }).where(and(eq(s.workAbsences.id, params.id), eq(s.workAbsences.tenantId, auth.tenantId), isNull(s.workAbsences.deletedAt))).returning({ id: s.workAbsences.id });
+      const r = await app.db.update(s.workAbsences).set({ deletedAt: new Date() }).where(and(eq(s.workAbsences.id, params.id), eq(s.workAbsences.tenantId, auth.tenantId), isNull(s.workAbsences.deletedAt))).returning();
       if (!r.length) throw notFound('Ausência não encontrada.');
+      await audit(app.db, req, { action: 'work_capacity.absence_remove', entityType: 'user', entityId: r[0]!.userId, metadata: { before: r[0], board: params.board } });
       return { ok: true };
     },
   }),
@@ -412,9 +425,10 @@ export const workSprintRoutes = [
   defineRoute({
     method: 'POST', url: '/quadros/feriados', summary: 'Feriado da empresa (sai da capacidade de todos os departamentos)', tag: 'Quadro de Tarefas', anyAuthenticated: true,
     body: z.object({ day: isoDay, name: z.string().trim().min(2).max(120) }),
-    handler: async ({ app, auth, body, reply }) => {
+    handler: async ({ app, auth, body, reply, req }) => {
       if (!auth.profiles.some((p) => ['administrador', 'diretoria', 'gerencia'].includes(p))) throw forbidden('Feriados são cadastrados pela gestão ou pelo administrador.');
       const [r] = await app.db.insert(s.companyHolidays).values({ tenantId: auth.tenantId, day: body.day, name: body.name, createdBy: auth.userId }).onConflictDoUpdate({ target: [s.companyHolidays.tenantId, s.companyHolidays.day], set: { name: body.name } }).returning({ id: s.companyHolidays.id });
+      await audit(app.db, req, { action: 'work_capacity.holiday_set', entityType: 'company_holiday', entityId: r!.id, metadata: body });
       reply.code(201);
       return r;
     },
@@ -422,9 +436,10 @@ export const workSprintRoutes = [
   defineRoute({
     method: 'DELETE', url: '/quadros/feriados/:id', summary: 'Retira um feriado', tag: 'Quadro de Tarefas', anyAuthenticated: true,
     params: z.object({ id: z.string().uuid() }),
-    handler: async ({ app, auth, params }) => {
+    handler: async ({ app, auth, params, req }) => {
       if (!auth.profiles.some((p) => ['administrador', 'diretoria', 'gerencia'].includes(p))) throw forbidden('Feriados são cadastrados pela gestão ou pelo administrador.');
-      await app.db.delete(s.companyHolidays).where(and(eq(s.companyHolidays.id, params.id), eq(s.companyHolidays.tenantId, auth.tenantId)));
+      const gone = await app.db.delete(s.companyHolidays).where(and(eq(s.companyHolidays.id, params.id), eq(s.companyHolidays.tenantId, auth.tenantId))).returning();
+      if (gone.length) await audit(app.db, req, { action: 'work_capacity.holiday_remove', entityType: 'company_holiday', entityId: params.id, metadata: { before: gone[0] } });
       return { ok: true };
     },
   }),

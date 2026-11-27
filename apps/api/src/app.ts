@@ -65,6 +65,7 @@ import { workBoardRoutes } from './routes/workBoards';
 import { workSprintRoutes } from './routes/workSprints';
 import { workFuraFilaRoutes } from './routes/workFuraFila';
 import { workProjectRoutes } from './routes/workProjects';
+import { workIndicatorRoutes } from './routes/workIndicators';
 import { performanceRoutes } from './routes/performance';
 import { indicatorRoutes } from './routes/indicators';
 import { resultsRoutes } from './routes/results';
@@ -290,6 +291,7 @@ export async function buildApp(opts: { config: Config; db: DB; logger?: boolean;
     ...workSprintRoutes,
     ...workFuraFilaRoutes,
     ...workProjectRoutes,
+    ...workIndicatorRoutes,
     ...performanceRoutes,
     ...indicatorRoutes,
     ...resultsRoutes,

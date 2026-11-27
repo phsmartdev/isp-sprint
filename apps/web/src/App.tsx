@@ -136,6 +136,7 @@ const AcademyEditorPage = lazy(() => import('./pages/playbooks/academy/Manage').
 const ApiDocsPage = lazy(() => import('./pages/playbooks/ApiDocs').then((m) => ({ default: m.ApiDocsPage })));
 const AdminPlans = lazy(() => import('./pages/admin/Admin').then((m) => ({ default: m.AdminPlans })));
 const WorkBoardPage = lazy(() => import('./pages/boards/WorkBoard').then((m) => ({ default: m.WorkBoardPage })));
+const ManagementViewPage = lazy(() => import('./pages/boards/ManagementView').then((m) => ({ default: m.ManagementViewPage })));
 const BoardsSettingsPage = lazy(() => import('./pages/admin/BoardsSettings').then((m) => ({ default: m.BoardsSettingsPage })));
 const AdminSources = lazy(() => import('./pages/admin/Admin').then((m) => ({ default: m.AdminSources })));
 const AdminIntegrations = lazy(() => import('./pages/admin/Admin').then((m) => ({ default: m.AdminIntegrations })));
@@ -260,6 +261,7 @@ export function App() {
         <Route path="quadro/comercial" element={<Gate module="atividades" feature="crm.quadro_tarefas"><WorkBoardPage /></Gate>} />
         <Route path="quadro/sucesso_cliente" element={<Gate module="atividades" feature="crm.quadro_sucesso"><WorkBoardPage /></Gate>} />
         <Route path="quadro/produto" element={<Gate module="atividades" feature="produto.quadro_tarefas"><WorkBoardPage /></Gate>} />
+        <Route path="quadro/gestao" element={<Gate module="atividades"><ManagementViewPage /></Gate>} />
         <Route path="marketing/quadro" element={<Gate module="campanhas" feature="marketing.quadro"><MarketingBoardPage /></Gate>} />
         <Route path="times/ferias" element={<GoTo to="/times/pessoas" aba="ferias" />} />
         <Route path="times/gamificacao" element={<GoTo to="/times/pessoas" aba="gamificacao" />} />
