@@ -1303,6 +1303,13 @@
       "when": 1795726275205,
       "tag": "0185_caixa_excluida",
       "breakpoints": true
+    },
+    {
+      "idx": 186,
+      "version": "7",
+      "when": 1795787409135,
+      "tag": "0186_aditivo_itens_prazo",
+      "breakpoints": true
     }
   ]
 }

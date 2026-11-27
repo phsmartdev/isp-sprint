@@ -2,7 +2,7 @@
 import { and, asc, desc, eq, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
-import { AMENDMENT_KINDS, AMENDMENT_LABELS, CONTRACT_ITEM_KINDS, addDays, amendmentError, amendmentLimits, contractValuesFromItems, itemKindOf, originalValue, type AmendmentKind } from '@isp/domain';
+import { AMENDMENT_KINDS, AMENDMENT_LABELS, CONTRACT_ITEM_KINDS, addDays, addMonths, amendmentError, amendmentLimits, contractValuesFromItems, itemKindOf, originalValue, type AmendmentKind } from '@isp/domain';
 import { defineRoute, IdParams } from '../http/route';
 import { forbidden, unprocessable } from '../http/errors';
 import * as s from '../db/schema';
@@ -21,7 +21,10 @@ const AmendmentBody = z.object({
   number: z.string().trim().min(1).max(40), signedOn: day, description: z.string().trim().min(5).max(1000), reforma: z.boolean().default(false), acordo: z.boolean().default(false),
   purposes: z.object({
     acrescimo: Delta.optional(), supressao: Delta.optional(), reequilibrio: Delta.optional(),
-    prazo: z.object({ newEndAt: day }).optional(), reajuste: z.object({ pct: z.number().min(-100).max(1000) }).optional(),
+    // prazo: nova data de término ou a duração somada ao término atual (meses e/ou dias)
+    prazo: z.object({ newEndAt: day.optional(), months: z.number().int().min(0).max(600).optional(), days: z.number().int().min(0).max(3650).optional() }).optional(),
+    // reajuste do contrato todo (pct) ou de itens específicos (índice do item na lista e o % de cada um)
+    reajuste: z.object({ pct: z.number().min(-100).max(1000).optional(), items: z.array(z.object({ index: z.number().int().min(0).max(49), pct: z.number().min(-100).max(1000) })).max(50).optional() }).optional(),
     itens: z.literal(true).optional(), outro: z.literal(true).optional(),
   }).optional(),
   items: z.array(ItemIn).max(50).optional(),
@@ -45,7 +48,9 @@ async function summary(db: Parameters<typeof currentVersion>[0], c: { id: string
   const list = await db.select().from(s.contractAmendments).where(eq(s.contractAmendments.contractId, c.id)).orderBy(asc(s.contractAmendments.signedOn), asc(s.contractAmendments.createdAt));
   const base = first ? originalValue({ totalCents: first.totalCents, monthlyCents: first.monthlyCents, termMonths: first.termMonths }) : 0;
   const reforma = list.some((a) => a.reforma);
-  return { list, limits: amendmentLimits(base, list, reforma), legalLimit: publicRegime(c) };
+  // itens como foram vendidos (versão 1, criada a partir dos produtos da oportunidade): referência fixa, o reajuste não muda
+  const soldItems = ((first?.items ?? []) as { description: string; qty: number; unitCents: number }[]).map((i) => ({ description: i.description, qty: i.qty, unitCents: i.unitCents }));
+  return { list, limits: amendmentLimits(base, list, reforma), legalLimit: publicRegime(c), soldItems };
 }
 
 export const contractAmendmentRoutes = [
@@ -81,7 +86,7 @@ export const contractAmendmentRoutes = [
     handler: async ({ app, auth, params }) => {
       const c = await loadContract(app.db, auth, params.id);
       const r = await summary(app.db, c);
-      return { items: r.list.map((a) => ({ ...a, label: AMENDMENT_LABELS[a.kind as keyof typeof AMENDMENT_LABELS] })), limits: r.limits, legalLimit: r.legalLimit, canManage: canManage(auth) };
+      return { items: r.list.map((a) => ({ ...a, label: AMENDMENT_LABELS[a.kind as keyof typeof AMENDMENT_LABELS] })), limits: r.limits, legalLimit: r.legalLimit, soldItems: r.soldItems, canManage: canManage(auth) };
     },
   }),
   defineRoute({
@@ -90,14 +95,15 @@ export const contractAmendmentRoutes = [
     handler: async ({ app, auth, params, body, req, reply }) => {
       const c = await loadContract(app.db, auth, params.id);
       if (!canManage(auth)) throw forbidden('Aditivos são registrados pela gestão de contratos, Inteligência Comercial, Jurídico ou Diretoria.');
-      if (c.stage === 'arquivado' || c.stage === 'cadastro_validacao') throw unprocessable('Aditivo só em contrato validado e não arquivado.');
+      if (c.stage === 'arquivado') throw unprocessable('Contrato arquivado não recebe aditivo. Reabra o contrato antes, se for o caso.');
+      if (c.stage === 'cadastro_validacao') throw unprocessable('Contrato ainda em validação: ajuste os dados direto em Editar. Aditivo é para contrato validado.');
       const p = purposesOf(body);
       const kinds = Object.keys(p) as AmendmentKind[];
       if (!kinds.length) throw unprocessable('Escolha ao menos uma finalidade do aditivo.', [{ path: 'purposes', message: 'Obrigatório' }]);
       if (p.acrescimo && !p.acrescimo.valueCents) throw unprocessable('Informe o valor do acréscimo.', [{ path: 'purposes.acrescimo.valueCents', message: 'Obrigatório' }]);
       if (p.supressao && !p.supressao.valueCents) throw unprocessable('Informe o valor da supressão.', [{ path: 'purposes.supressao.valueCents', message: 'Obrigatório' }]);
-      if (p.prazo && !p.prazo.newEndAt) throw unprocessable('Informe o novo término.', [{ path: 'purposes.prazo.newEndAt', message: 'Obrigatório' }]);
-      if (p.reajuste && !p.reajuste.pct) throw unprocessable('Informe o percentual do reajuste.', [{ path: 'purposes.reajuste.pct', message: 'Obrigatório' }]);
+      if (p.prazo && !p.prazo.newEndAt && !p.prazo.months && !p.prazo.days) throw unprocessable('Informe o novo término ou quanto o prazo aumenta (meses ou dias).', [{ path: 'purposes.prazo', message: 'Obrigatório' }]);
+      if (p.reajuste && !p.reajuste.pct && !p.reajuste.items?.some((i) => i.pct)) throw unprocessable('Informe o percentual do reajuste do contrato ou de ao menos um item.', [{ path: 'purposes.reajuste.pct', message: 'Obrigatório' }]);
       if (p.itens && !body.items?.length) throw unprocessable('Informe os itens do contrato depois do aditivo.', [{ path: 'items', message: 'Obrigatório' }]);
       const groupId = randomUUID();
       const out = await app.db.transaction(async (tx) => {
@@ -110,7 +116,11 @@ export const contractAmendmentRoutes = [
           if (err) throw unprocessable(err, [{ path: `purposes.${k}.valueCents`, message: 'Acima do limite legal' }]);
         }
         const cur = await currentVersion(tx, c);
-        const newEndAt = p.prazo?.newEndAt ?? null;
+        // duração somada ao término atual: +meses, depois +dias
+        const byDuration = !!p.prazo && !p.prazo.newEndAt && !!(p.prazo.months || p.prazo.days);
+        if (byDuration && !cur.endAt) throw unprocessable('O contrato não tem término cadastrado: informe a nova data de término.', [{ path: 'purposes.prazo.newEndAt', message: 'Obrigatório' }]);
+        // conta a partir do dia seguinte ao término (fim em 30/11 + 1 mês = 31/12)
+        const newEndAt = p.prazo?.newEndAt ?? (byDuration ? addDays(addMonths(addDays(cur.endAt!, 1), p.prazo!.months ?? 0), (p.prazo!.days ?? 0) - 1) : null);
         if (newEndAt && cur.endAt && newEndAt <= cur.endAt) throw unprocessable('O novo término precisa ser depois do atual.');
         if (newEndAt && c.legalLimitAt && newEndAt > c.legalLimitAt) throw unprocessable(`O novo término passa do limite total de vigência (${c.legalLimitAt}).`);
         // valores: itens novos (se houver) → reajuste → acréscimos/supressões/reequilíbrio
@@ -118,7 +128,23 @@ export const contractAmendmentRoutes = [
         let monthly = body.items?.length ? contractValuesFromItems(items, null).monthlyCents : cur.monthlyCents;
         let total = cur.totalCents;
         let adjDelta = 0;
-        if (p.reajuste?.pct) {
+        let itemAdjustments: { description: string; pct: number; fromCents: number; toCents: number }[] | null = null;
+        const perItem = (p.reajuste?.items ?? []).filter((x) => x.pct);
+        if (perItem.length) {
+          // reajuste só dos itens escolhidos, cada um com o seu %
+          const before = monthly;
+          for (const x of perItem) if (x.index >= items.length) throw unprocessable('Item do reajuste não existe na lista do contrato.', [{ path: 'purposes.reajuste.items', message: 'Item inválido' }]);
+          itemAdjustments = [];
+          items = items.map((i, n) => {
+            const x = perItem.find((y) => y.index === n);
+            if (!x) return i;
+            const to = Math.round(i.unitCents * (1 + x.pct / 100));
+            itemAdjustments!.push({ description: i.description, pct: x.pct, fromCents: i.unitCents, toCents: to });
+            return { ...i, unitCents: to };
+          });
+          monthly = contractValuesFromItems(items, null).monthlyCents;
+          adjDelta = monthly - before;
+        } else if (p.reajuste?.pct) {
           const f = 1 + p.reajuste.pct / 100;
           const before = monthly;
           items = items.map((i) => ({ ...i, unitCents: Math.round(i.unitCents * f) }));
@@ -137,6 +163,8 @@ export const contractAmendmentRoutes = [
         if (total !== cur.totalCents) patch.totalCents = total;
         if (JSON.stringify(items) !== JSON.stringify(cur.items)) patch.items = items;
         if (newEndAt) { patch.endAt = newEndAt; patch.renewalAt = addDays(newEndAt, 1); }
+        // prazo somado em meses: o prazo total do contrato acompanha
+        if (byDuration && p.prazo!.months && cur.termMonths) patch.termMonths = cur.termMonths + p.prazo!.months;
         const labels = kinds.map((k) => AMENDMENT_LABELS[k]).join(' + ');
         const v = await newVersion(tx, c, auth.userId, patch, 'aditivo', `Termo aditivo ${body.number} (${labels}): ${body.description}`);
         const sign = (k: AmendmentKind) => (k === 'supressao' ? -1 : 1);
@@ -145,7 +173,7 @@ export const contractAmendmentRoutes = [
           return {
             tenantId: auth.tenantId, contractId: c.id, number: body.number, kind: k, signedOn: body.signedOn, groupId, version: v.version, createdBy: auth.userId,
             valueDeltaCents: sign(k) * (x?.valueCents ?? 0), monthlyDeltaCents: k === 'reajuste' ? adjDelta : sign(k) * (x?.monthlyCents ?? 0),
-            newEndAt: k === 'prazo' ? newEndAt : null, adjustmentPct: k === 'reajuste' ? p.reajuste!.pct : null,
+            newEndAt: k === 'prazo' ? newEndAt : null, extendMonths: k === 'prazo' && byDuration ? p.prazo!.months ?? null : null, extendDays: k === 'prazo' && byDuration ? p.prazo!.days ?? null : null, adjustmentPct: k === 'reajuste' && !itemAdjustments ? p.reajuste!.pct ?? null : null, itemAdjustments: k === 'reajuste' ? itemAdjustments : null,
             reforma: k === 'acrescimo' && body.reforma, acordo: k === 'supressao' && body.acordo, description: body.description,
           };
         });
@@ -156,8 +184,8 @@ export const contractAmendmentRoutes = [
         }
         const parts = [
           p.acrescimo?.valueCents ? `acréscimo de ${brl(p.acrescimo.valueCents)}` : '', p.supressao?.valueCents ? `supressão de ${brl(p.supressao.valueCents)}` : '',
-          p.reajuste ? `reajuste de ${p.reajuste.pct.toLocaleString('pt-BR')}%` : '', p.reequilibrio?.valueCents ? `reequilíbrio de ${brl(p.reequilibrio.valueCents)}` : '',
-          newEndAt ? `novo término ${newEndAt}` : '', patch.items ? 'itens atualizados' : '',
+          itemAdjustments ? `reajuste de ${itemAdjustments.map((x) => `${x.description} ${x.pct.toLocaleString('pt-BR')}%`).join(', ')}` : p.reajuste?.pct ? `reajuste de ${p.reajuste.pct.toLocaleString('pt-BR')}%` : '', p.reequilibrio?.valueCents ? `reequilíbrio de ${brl(p.reequilibrio.valueCents)}` : '',
+          newEndAt ? `${byDuration ? `prazo +${[p.prazo!.months ? `${p.prazo!.months} ${p.prazo!.months === 1 ? 'mês' : 'meses'}` : '', p.prazo!.days ? `${p.prazo!.days} dia(s)` : ''].filter(Boolean).join(' e ')}, ` : ''}novo término ${newEndAt}` : '', patch.items ? 'itens atualizados' : '',
         ].filter(Boolean).join('; ');
         await addEvent(tx, auth.tenantId, c.id, auth.userId, 'aditivo', `Termo aditivo ${body.number} (${labels})${parts ? `: ${parts}` : ''}. Versão ${v.version}.`, { amendmentIds: ins.map((x) => x.id), groupId, version: v.version });
         return ins[0]!.id;
