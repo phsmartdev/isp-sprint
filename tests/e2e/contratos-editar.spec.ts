@@ -9,7 +9,7 @@ async function login(page: Page, email: string) {
   await expect(page.getByRole('button', { name: /^Conta de / })).toBeVisible();
 }
 
-test('editar contrato vigente: próxima ação salva direto; prazo pede motivo e vira nova versão', async ({ page }) => {
+test('contrato vigente: próxima ação salva direto; dados contratuais travados (só aditivo); faturamento pede motivo e vira versão', async ({ page }) => {
   test.setTimeout(120_000);
   await login(page, 'carlos@yepnet.test');
   const list = await (await page.request.get('/api/v1/contracts?pageSize=50')).json();
@@ -28,8 +28,10 @@ test('editar contrato vigente: próxima ação salva direto; prazo pede motivo e
 
   await page.getByRole('button', { name: 'Editar', exact: true }).first().click();
   dr = page.getByRole('dialog', { name: /Editar contrato/ });
-  const term = dr.getByLabel('Prazo (meses)');
-  await term.fill(String(Number((await term.inputValue()) || '12') + 6));
+  await expect(dr.getByRole('note')).toContainText('só mudam por aditivo');
+  await expect(dr.getByLabel('Prazo (meses)')).toBeDisabled();
+  await expect(dr.getByLabel('Objeto')).toBeDisabled();
+  await dr.getByLabel('Início do faturamento').fill('2026-12-01');
   await dr.getByRole('button', { name: 'Salvar' }).click();
   await expect(dr.getByRole('alert')).toContainText('Informe o motivo da alteração');
   await dr.getByLabel('Motivo da alteração').fill('Prorrogação fictícia de teste');
@@ -37,4 +39,9 @@ test('editar contrato vigente: próxima ação salva direto; prazo pede motivo e
   await expect(dr).toBeHidden();
   after = await (await page.request.get(`/api/v1/contracts/${c.id}`)).json();
   expect(after.currentVersion).toBe(before + 1);
+
+  // a API também recusa mudar dado contratual de contrato validado
+  const put = await page.request.put(`/api/v1/contracts/${c.id}`, { data: { version: { termMonths: 99 }, reason: 'teste' } });
+  expect(put.status()).toBe(422);
+  expect((await put.json()).detail).toContain('só muda por aditivo');
 });

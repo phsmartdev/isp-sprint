@@ -124,7 +124,14 @@ describe('contrato privado: oportunidade → implantação → renovação → r
 
   it('renovação: 60 dias antes abre o processo, cria tarefa para Inteligência Comercial, avisa comercial e CSM; sem duplicar', async () => {
     expect((await carlos.put(`/contracts/${contractId}`, { version: { endAt: addDays(today, 50) } })).statusCode).toBe(422);
-    ok(await carlos.put(`/contracts/${contractId}`, { csmId: mariana.me.user.id, version: { endAt: addDays(today, 50) }, reason: 'Teste: término antecipado' }));
+    // contrato validado: término só muda por aditivo; o teste antecipa o fim direto no banco para simular a data
+    const put = await carlos.put(`/contracts/${contractId}`, { csmId: mariana.me.user.id, version: { endAt: addDays(today, 50) }, reason: 'Teste: término antecipado' });
+    expect(put.statusCode).toBe(422);
+    expect(put.json().detail).toContain('só muda por aditivo');
+    ok(await carlos.put(`/contracts/${contractId}`, { csmId: mariana.me.user.id }));
+    await ctx.app.db.execute(sql`alter table contract_versions disable trigger contract_versions_append_only`);
+    await ctx.app.db.execute(sql`update contract_versions set end_at = ${addDays(today, 50)}, renewal_at = ${addDays(today, 51)} where contract_id = ${contractId} and version = (select current_version from contracts where id = ${contractId})`);
+    await ctx.app.db.execute(sql`alter table contract_versions enable trigger contract_versions_append_only`);
     sent.length = 0;
     const r1 = ok(await carlos.post('/contracts/alerts/run')).json();
     expect(r1.contractAlerts).toBeGreaterThanOrEqual(1);

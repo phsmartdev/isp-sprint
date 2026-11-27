@@ -19,6 +19,7 @@ import * as s from '../db/schema';
 import { groupBy } from '../services/group';
 import type { DbOrTx } from '../db/client';
 import { handoffContractToCs } from '../services/customerSuccess';
+import { usersWithModule } from '../services/moduleAccess';
 import { audit } from '../services/audit';
 import { level } from '../services/scope';
 import { oppVisibility } from '../services/opportunities';
@@ -62,6 +63,13 @@ const VersionFields = z.object({
   zenith: ZenithBody.nullable().optional(),
   serviceType: z.enum(CONTRACT_SERVICE_TYPES).nullable().optional(),
 });
+/** Dados contratuais: depois da validação só mudam por aditivo. */
+const CONTRACT_LOCKED_FIELDS = ['number', 'object', 'signedAt', 'startAt', 'endAt', 'termMonths', 'renewalAt', 'monthlyCents', 'totalCents', 'billingDay', 'billingTerms', 'items', 'publicTerms', 'adjustmentIndex', 'adjustmentBaseDate', 'adjustmentRule', 'specialConditions', 'serviceType'] as const;
+const CONTRACT_FIELD_LABELS: Record<string, string> = {
+  number: 'número', object: 'objeto', signedAt: 'assinatura', startAt: 'início da vigência', endAt: 'término', termMonths: 'prazo', renewalAt: 'renovação prevista', monthlyCents: 'valor mensal', totalCents: 'valor global',
+  billingDay: 'dia de faturamento', billingTerms: 'condições de faturamento', items: 'produtos e serviços', publicTerms: 'dados do contrato público', adjustmentIndex: 'índice de reajuste', adjustmentBaseDate: 'data-base do reajuste',
+  adjustmentRule: 'regra de reajuste', specialConditions: 'condições específicas', serviceType: 'serviço do contrato', kind: 'público ou privado', billingType: 'tipo de contrato', legalRegime: 'regime jurídico', legalLimitAt: 'limite de vigência', renewalClause: 'cláusula de renovação',
+};
 const Header = z.object({
   kind: z.enum(CONTRACT_KINDS).default('privado'),
   billingType: z.enum(BILLING_TYPES).default('recorrente'),
@@ -80,6 +88,13 @@ const Header = z.object({
 });
 const CreateBody = Header.extend({ opportunityId: uuid.nullable().default(null), contactId: uuid.nullable().default(null), initialBalanceCents: z.number().int().min(0).max(1_000_000_000_000).default(0), version: VersionFields });
 const UpdateBody = Header.partial().extend({ version: VersionFields.partial().optional(), reason: z.string().trim().max(500).optional() });
+
+/** Responsável comercial do contrato: só quem tem acesso ao módulo Contratos (27/11/2026). O atual pode continuar. */
+async function assertCommercialOwner(db: DbOrTx, tenantId: string, userId: string | null | undefined, keep?: string | null) {
+  if (!userId || userId === keep) return;
+  const ok = await usersWithModule(db, tenantId, 'contratos', 'contratos');
+  if (!ok.has(userId)) throw unprocessable('O responsável comercial precisa ter acesso ao módulo Contratos.', [{ path: 'commercialOwnerId', message: 'Sem acesso a Contratos' }]);
+}
 
 /** A filial precisa ser da empresa. */
 async function assertBranch(db: DbOrTx, tenantId: string, branchId: string | null | undefined) {
@@ -274,7 +289,7 @@ export const contractRoutes = [
     module: 'contratos',
     body: CreateBody,
     handler: async ({ app, auth, body, req, reply }) => {
-      let contactId = body.contactId, customerId: string | null = null, oppTitle: string | null = null, arpFromOpp: string | null = null, branchId: string | null = body.branchId;
+      let contactId = body.contactId, customerId: string | null = null, oppTitle: string | null = null, arpFromOpp: string | null = null, branchId: string | null = body.branchId, oppOwnerId: string | null = null;
       if (body.opportunityId) {
         const [o] = await app.db.select().from(s.opportunities).where(and(eq(s.opportunities.id, body.opportunityId), eq(s.opportunities.tenantId, auth.tenantId), canManage(auth) ? undefined : oppVisibility(auth))).limit(1);
         if (!o) throw notFound('Oportunidade não encontrada.');
@@ -282,6 +297,7 @@ export const contractRoutes = [
         const [dup] = await app.db.select({ id: s.contracts.id }).from(s.contracts).where(eq(s.contracts.opportunityId, o.id)).limit(1);
         if (dup) throw unprocessable('Esta oportunidade já tem contrato cadastrado.', [{ path: 'opportunityId', message: dup.id }]);
         contactId = o.contactId; customerId = o.customerId; oppTitle = o.title; arpFromOpp = o.arpId; branchId = branchId ?? o.branchId;
+        oppOwnerId = o.ownerId;
       }
       if (!contactId) throw unprocessable('Informe a oportunidade ou o cliente.', [{ path: 'contactId', message: 'Obrigatório' }]);
       const [contact] = await app.db.select({ id: s.contacts.id }).from(s.contacts).where(and(eq(s.contacts.id, contactId), eq(s.contacts.tenantId, auth.tenantId))).limit(1);
@@ -289,6 +305,7 @@ export const contractRoutes = [
       if (!customerId) customerId = (await app.db.select({ id: s.customers.id }).from(s.customers).where(eq(s.customers.contactId, contactId)).limit(1))[0]?.id ?? null;
       if (level(auth, 'contratos') === 'proprio' && body.commercialOwnerId !== auth.userId && !canManage(auth)) throw forbidden('No nível Próprio, o responsável comercial é você.');
       await assertUsers(app.db, auth, [body.commercialOwnerId, body.operationalOwnerId, body.csmId, body.adminOwnerId]);
+      await assertCommercialOwner(app.db, auth.tenantId, body.commercialOwnerId, oppOwnerId);
       await assertBranch(app.db, auth.tenantId, branchId);
       const ver = normalizeVersion(body.version);
       // só serviços de telecom vão para o Zenith; nos demais o cadastro Zenith não é guardado
@@ -808,6 +825,15 @@ export const contractRoutes = [
   }),
 
   defineRoute({
+    method: 'GET',
+    url: '/contracts/commercial-owners',
+    summary: 'Quem pode ser responsável comercial de contrato: pessoas com acesso ao módulo Contratos',
+    tag: 'Contratos',
+    module: 'contratos',
+    handler: async ({ app, auth }) => ({ userIds: [...(await usersWithModule(app.db, auth.tenantId, 'contratos', 'contratos'))] }),
+  }),
+
+  defineRoute({
     method: 'PUT',
     url: '/contracts/:id',
     summary: 'Edita o contrato. Mudança nos dados contratuais gera nova versão (INSERT) com motivo; a anterior fica preservada.',
@@ -834,9 +860,17 @@ export const contractRoutes = [
         const changed = Object.fromEntries(Object.entries(body.version).filter(([k, v]) => v !== undefined && !same(k, v, cur[k])));
         body.version = Object.keys(changed).length ? (changed as typeof body.version) : undefined;
       }
+      // depois de validado, os dados contratuais travam: só mudam por aditivo (27/11/2026). Cadastro operacional segue editável.
+      if (c.validatedAt) {
+        const lockedV = body.version ? Object.keys(body.version).filter((k) => (CONTRACT_LOCKED_FIELDS as readonly string[]).includes(k)) : [];
+        const lockedH = (['kind', 'billingType', 'legalRegime', 'legalLimitAt', 'renewalClause'] as const).filter((k) => body[k] !== undefined && JSON.stringify(body[k] ?? null) !== JSON.stringify((c as Record<string, unknown>)[k] ?? null));
+        const locked = [...lockedH, ...lockedV];
+        if (locked.length) throw unprocessable(`Contrato validado: ${locked.map((k) => CONTRACT_FIELD_LABELS[k] ?? k).join(', ')} só muda${locked.length > 1 ? 'm' : ''} por aditivo.`, locked.map((k) => ({ path: k, message: 'Só por aditivo' })));
+      }
       if (body.version && (body.version.items !== undefined || body.version.monthlyCents !== undefined || body.version.totalCents !== undefined)) requireAction(auth, 'editar_valores_contrato');
       if (c.validatedAt && body.version && !body.reason) throw unprocessable(`Informe o motivo da alteração (fica no histórico da versão). Mudou: ${Object.keys(body.version).join(', ')}.`, [{ path: 'reason', message: 'Obrigatório' }]);
       await assertUsers(app.db, auth, [body.commercialOwnerId, body.operationalOwnerId, body.csmId, body.adminOwnerId]);
+      await assertCommercialOwner(app.db, auth.tenantId, body.commercialOwnerId, c.commercialOwnerId);
       const out = await app.db.transaction(async (tx) => {
         const header: Partial<ContractRow> = {};
         for (const k of ['kind', 'billingType', 'legalRegime', 'commercialOwnerId', 'operationalOwnerId', 'csmId', 'adminOwnerId', 'legalLimitAt', 'nextAction', 'nextActionAt', 'branchId', 'renewalClause'] as const) if (body[k] !== undefined) (header as Record<string, unknown>)[k] = body[k];
