@@ -326,7 +326,7 @@ function Heat({ heat }: { heat: number[][] }) {
 
 type Cfg = {
   enabled: boolean; rootEntityId: number; managerIds: string[]; groupLeaders: Record<string, string[]>;
-  settings: { goalPct: number; slaSource: 'universal' | 'glpi'; solveHours: number; ownHours: number; businessHoursOnly: boolean; businessStart: number; businessEnd: number; businessDays: number[]; warnHours: number[]; unassignedMinutes: number; repeatLateHours: number; escalateAfterHours: number; digestHour: number; email: boolean; whatsapp: boolean };
+  settings: { goalPct: number; slaSource: 'universal' | 'glpi'; solveHours: number; ownHours: number; businessHoursOnly: boolean; businessStart: number; businessEnd: number; businessDays: number[]; warnHours: number[]; unassignedMinutes: number; repeatLateHours: number; escalateAfterHours: number; digestHour: number; email: boolean; whatsapp: boolean; mentionReplyHours?: number | null; approvalReplyHours?: number | null };
   groups: { id: number; name: string; members: string[] }[]; people: { id: string; name: string; hasPhone: boolean }[];
   lastSyncAt: string | null; lastError: string | null;
   recent: { stage: string; channel: string; ok: boolean; error: string | null; sentAt: string; alertKey: string; userName: string }[];
@@ -366,6 +366,10 @@ function ConfigDrawer({ onClose }: { onClose: () => void }) {
               <FormField label="Horas para solucionar" htmlFor="sla-solve"><Input id="sla-solve" inputMode="decimal" value={String(f.settings.solveHours)} onChange={(e) => set('solveHours', num(e.target.value))} /></FormField>
               <FormField label="Horas para assumir" htmlFor="sla-own"><Input id="sla-own" inputMode="decimal" value={String(f.settings.ownHours)} onChange={(e) => set('ownHours', num(e.target.value))} /></FormField>
               <FormField label="Meta do nível de serviço (%)" htmlFor="sla-goal"><Input id="sla-goal" inputMode="decimal" value={String(f.settings.goalPct)} onChange={(e) => set('goalPct', num(e.target.value))} /></FormField>
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <FormField label="Horas para responder menção" htmlFor="sla-mention" hint={`Gamificação: fora deste prazo não pontua. Vazio = ${f.settings.ownHours} h (prazo para assumir).`}><Input id="sla-mention" inputMode="decimal" value={f.settings.mentionReplyHours ? String(f.settings.mentionReplyHours) : ''} onChange={(e) => set('mentionReplyHours', e.target.value.trim() ? num(e.target.value) : null)} /></FormField>
+              <FormField label="Horas para responder aprovação" htmlFor="sla-approval" hint={`Gamificação: fora deste prazo não pontua. Vazio = ${f.settings.ownHours} h (prazo para assumir).`}><Input id="sla-approval" inputMode="decimal" value={f.settings.approvalReplyHours ? String(f.settings.approvalReplyHours) : ''} onChange={(e) => set('approvalReplyHours', e.target.value.trim() ? num(e.target.value) : null)} /></FormField>
             </div>
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="h-4 w-4 accent-primary" checked={f.settings.businessHoursOnly} onChange={(e) => set('businessHoursOnly', e.target.checked)} />Contar só horas úteis (horário comercial abaixo)</label>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">

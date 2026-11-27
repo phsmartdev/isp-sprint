@@ -5,9 +5,10 @@
  * O mesmo código faz a carga histórica (backfill) e a atualização incremental.
  */
 import { and, desc, eq, sql } from 'drizzle-orm';
-import { DEFAULT_PERFORMANCE_CONFIG, computeCredits, eventTypeDef, type BusinessEventType, type PerformanceConfig } from '@isp/domain';
+import { DEFAULT_PERFORMANCE_CONFIG, computeCredits, eventTypeDef, glpiScoreEvents, type BusinessEventType, type PerformanceConfig } from '@isp/domain';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
+import { settingsOf as slaSettingsOf } from './glpiSla';
 
 type Candidate = {
   key: string; type: BusinessEventType; sourceType: string; sourceId: string; ownerId: string | null; participants: string[];
@@ -173,6 +174,29 @@ async function candidates(db: DbOrTx, t: string): Promise<Candidate[]> {
            p.completed_at as occurred_at, null::bigint as value_cents, null::int as quantity, p.kind as outcome,
            jsonb_build_object('dueOn', p.due_on, 'onTime', p.due_on is null or p.completed_at::date <= p.due_on) as context
       from projects p where p.tenant_id = ${t} and p.deleted_at is null and p.status = 'concluido' and p.completed_at is not null and ${notExists(pjKey)}`);
+  out.push(...(await glpiCandidates(db, t)));
+  return out;
+}
+
+/** GLPI (Dados Planejados): assumir, solucionar, responder menção e aprovação — só o que foi feito dentro do prazo. */
+async function glpiCandidates(db: DbOrTx, t: string): Promise<Candidate[]> {
+  const [st] = await db.select().from(s.glpiSlaSettings).where(eq(s.glpiSlaSettings.tenantId, t)).limit(1);
+  if (!st) return [];
+  const settings = slaSettingsOf(st);
+  const [tn] = await db.select({ tz: s.tenants.timezone }).from(s.tenants).where(eq(s.tenants.id, t)).limit(1);
+  // últimos 120 dias com alguma ação; as chaves já gravadas são puladas (a sincronização pode rodar quantas vezes for)
+  const tickets = await db.select().from(s.glpiQueueTickets).where(and(eq(s.glpiQueueTickets.tenantId, t), sql`${s.glpiQueueTickets.openedAt} > now() - interval '120 days'`,
+    sql`(${s.glpiQueueTickets.takenAt} is not null or ${s.glpiQueueTickets.solvedAt} is not null or ${s.glpiQueueTickets.closedAt} is not null or jsonb_array_length(${s.glpiQueueTickets.mentions}) > 0 or jsonb_array_length(${s.glpiQueueTickets.approvals}) > 0)`));
+  if (!tickets.length) return [];
+  const done = new Set((await rows<{ k: string }>(db, sql`select idem_key as k from business_events where tenant_id = ${t} and idem_key like 'glpi_%'`)).map((r) => r.k));
+  const out: Candidate[] = [];
+  for (const k of tickets) {
+    for (const e of glpiScoreEvents(k.glpiId, { openedAt: k.openedAt, dueOwnAt: k.dueOwnAt, dueSolveAt: k.dueSolveAt, takenAt: k.takenAt, solvedAt: k.solvedAt, closedAt: k.closedAt, userIds: k.userIds, mentions: k.mentions, approvals: k.approvals }, settings, tn?.tz ?? 'America/Sao_Paulo')) {
+      if (done.has(e.key)) continue;
+      out.push({ key: e.key, type: e.type, sourceType: 'glpi_ticket', sourceId: k.id, ownerId: e.userId, participants: [], occurredAt: e.at, valueCents: null, quantity: null, outcome: null,
+        context: { glpiId: k.glpiId, title: k.title, due: e.due.toISOString(), onTime: true } });
+    }
+  }
   return out;
 }
 
