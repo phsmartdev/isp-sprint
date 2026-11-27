@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_SLA_SETTINGS, glpiScoreEvents, type GlpiScoreTicket } from './glpiSla';
+import { DEFAULT_SLA_SETTINGS, glpiScoreEvents, type GlpiScoreTicket, type SlaSettings } from './glpiSla';
 
 // horas corridas para as contas ficarem óbvias: assumir 4 h, solucionar 24 h
-const s = { ...DEFAULT_SLA_SETTINGS, businessHoursOnly: false, slaSource: 'universal' as const, ownHours: 4, solveHours: 24 };
+const s: SlaSettings = { ...DEFAULT_SLA_SETTINGS, businessHoursOnly: false, slaSource: 'universal', ownHours: 4, solveHours: 24 };
 const open = new Date('2026-11-23T12:00:00Z');
 const h = (n: number) => new Date(open.getTime() + n * 3_600_000);
 const base: GlpiScoreTicket = { openedAt: open, dueOwnAt: null, dueSolveAt: null, takenAt: null, solvedAt: null, closedAt: null, userIds: ['ana'], mentions: [], approvals: [] };

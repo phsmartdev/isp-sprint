@@ -18,6 +18,7 @@ import { Avatar, Button, Chip, FormField, Input, LoadingRows, Notice, Select, Te
 import { Drawer, useToast } from '../../components/ui/overlay';
 import { MentionInput, mentionsIn, type Participant } from '../MentionInput';
 import { errMsg } from '../contracts/shared';
+import { TaskPlanning, type TaskPlanningData } from './TaskPlanning';
 import { NewTaskDialog, PRIO_LABEL, TaskStatusChip, useInvalidateTasks, type TaskItem, type TaskList } from './shared';
 
 type Dep = { id: string; title: string; status: TaskStatus; ownerName: string };
@@ -30,6 +31,7 @@ type Detail = TaskItem & {
   parent: { id: string; title: string } | null; people: { id: string; name: string }[];
   stages: { id: string; name: string; done: boolean }[]; milestones: { id: string; name: string }[];
   can: { edit: boolean; assign: boolean; approve: boolean; comment: boolean };
+  planning?: TaskPlanningData;
 };
 
 const EVENT_LABELS: Record<string, string> = {
@@ -145,6 +147,8 @@ function Body({ t, onOpen, onRemoved }: { t: Detail; onOpen: (id: string) => voi
           </div>
         )}
       </div>
+
+      {t.planning && <TaskPlanning key={t.rowVersion} id={t.id} rowVersion={t.rowVersion} p={t.planning} canEdit={!ro} />}
 
       {/* campos */}
       <fieldset disabled={ro} className="grid grid-cols-1 gap-4 sm:grid-cols-2">

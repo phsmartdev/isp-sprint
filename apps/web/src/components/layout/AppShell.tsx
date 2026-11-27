@@ -42,6 +42,7 @@ const NAV: NavEntry[] = [
     { to: '/customers', label: 'Contas', module: 'clientes', feature: 'crm.contas' },
     { to: '/aprovacoes', label: 'Aprovações', module: 'oportunidades', badge: 'approvals' },
     { to: '/activities', label: 'Atividades', module: 'atividades', feature: 'crm.atividades' },
+    { to: '/quadro/comercial', label: 'Quadro de Tarefas', module: 'atividades', feature: 'crm.quadro_tarefas' },
     { to: '/brindes?t=compliance', label: 'Solicitar brindes e apoios', module: 'oportunidades' },
   ] },
   { key: 'contratos', label: 'Gestão de Contratos', icon: <FileSignature className={ICON} />, children: [
@@ -55,9 +56,14 @@ const NAV: NavEntry[] = [
     { to: '/contracts?t=empenhos', label: 'Controle de Empenhos', module: 'contratos', contractTab: 'empenhos' },
     { to: '/contracts?t=calendario', label: 'Calendário', module: 'contratos', contractTab: 'calendario' },
     { to: '/contracts?t=relatorios', label: 'Relatórios', module: 'contratos', contractTab: 'relatorios' },
+    // mesmo quadro do Comercial (é o mesmo time): sem quadro próprio de Contratos
+    { to: '/quadro/comercial', label: 'Quadro de Tarefas', module: 'atividades', feature: 'crm.quadro_tarefas' },
   ] },
   { to: '/pessoas', label: 'Pessoas & Gestão', icon: <UsersRound className={ICON} />, module: 'pessoas', feature: 'pessoas_cultura.experiencia' },
-  { to: '/sucesso', label: 'Sucesso do Cliente', icon: <HeartHandshake className={ICON} />, module: 'clientes', feature: 'crm.sucesso_cliente' },
+  { key: 'sucesso', label: 'Sucesso do Cliente', icon: <HeartHandshake className={ICON} />, children: [
+    { to: '/sucesso', label: 'Painel', module: 'clientes', feature: 'crm.sucesso_cliente' },
+    { to: '/quadro/sucesso_cliente', label: 'Quadro de Tarefas', module: 'atividades', feature: 'crm.quadro_sucesso' },
+  ] },
   { to: '/email', label: 'E-mail', icon: <Mail className={ICON} />, module: 'email', also: ['/email/caixas'] },
   { key: 'marketing', label: 'Marketing', icon: <Megaphone className={ICON} />, children: [
     { to: '/leads', label: 'Leads', module: 'leads' },
@@ -66,7 +72,10 @@ const NAV: NavEntry[] = [
     { to: '/campaigns', label: 'Plays/Campanhas', module: 'campanhas' },
     { to: '/brindes', label: 'Brindes', module: 'campanhas' },
   ] },
-  { to: '/produto', label: 'Produto', icon: <Package className={ICON} />, module: 'inicio', feature: 'produto.catalogo' },
+  { key: 'produto', label: 'Produto', icon: <Package className={ICON} />, children: [
+    { to: '/produto', label: 'Catálogo', module: 'inicio', feature: 'produto.catalogo' },
+    { to: '/quadro/produto', label: 'Quadro de Tarefas', module: 'atividades', feature: 'produto.quadro_tarefas' },
+  ] },
   { key: 'times', label: 'Gestão de Times', icon: <Gauge className={ICON} />, children: [
     { to: '/times', label: 'Painel', module: 'resultados' },
     { to: '/times/metas', label: 'Metas e indicadores', module: 'desempenho' },

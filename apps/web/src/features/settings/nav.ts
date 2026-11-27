@@ -21,6 +21,7 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
   ] },
   { key: 'vendas', label: 'Vendas e funil', desc: 'Como a oportunidade nasce, anda e é aprovada.', items: [
     { to: '/settings/journeys', label: 'Jornadas e automações', desc: 'Funis, etapas, quem trabalha em cada um e automações.', admin: true, keywords: 'pipeline etapas funil' },
+    { to: '/settings/quadros', label: 'Quadros de Tarefas', desc: 'Equipes de cada departamento, limite de tarefas em execução e diretriz de capacidade 70/20/10.', admin: true, keywords: 'sprint planejamento capacidade 70 20 10 fura-fila equipe departamento' },
     { to: '/settings/sources', label: 'Canais de entrada', desc: 'Por onde o cliente chega: WhatsApp, site, telefone.', admin: true, keywords: 'origem lead' },
     { to: '/settings/fields', label: 'Campos personalizados', desc: 'Campos extras em contas, oportunidades e contratos.', admin: true },
     { to: '/settings/contratos-comunicacao', label: 'Comunicação de contratos', desc: 'Esteiras de comunicação (fluxo com setas) e templates de e-mail e WhatsApp, com aprovação de cada envio.', admin: true, keywords: 'esteira fluxo template email whatsapp comunicação aviso aprovação' },

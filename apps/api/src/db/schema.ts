@@ -861,6 +861,23 @@ export const activities = pgTable(
     raciKey: text('raci_key'),
     /** concluir exige ao menos um arquivo anexado como evidência */
     evidenceRequired: boolean('evidence_required').notNull().default(false),
+    /**
+     * Quadro de Tarefas (27/11/2026). Departamento executor (vazio = o quadro da equipe do responsável), categoria de
+     * capacidade 70/20/10 (vazio = automática: ligada a oportunidade é comercial), esforço restante (o estimado é
+     * estimate_minutes), prazo acordado, semana planejada e Sprint (em work_sprint_items), ordem na semana e compromisso
+     * protegido (prazo legal, contratual ou crítico com cliente: não entra automaticamente no deslocamento por fura-fila).
+     */
+    boardKey: text('board_key'),
+    capacityCategory: text('capacity_category'),
+    remainingMinutes: integer('remaining_minutes'),
+    agreedDueAt: ts('agreed_due_at'),
+    plannedWeek: date('planned_week', { mode: 'string' }),
+    planOrder: integer('plan_order'),
+    protectedCommitment: boolean('protected_commitment').notNull().default(false),
+    /** enviada por outro time: quadro de quem enviou (acompanha em "Enviadas", sem gerir), quem e quando */
+    originBoard: text('origin_board'),
+    sentBy: uuid('sent_by').references((): AnyPgColumn => users.id),
+    sentAt: ts('sent_at'),
   },
   (t) => ({
     acceptCk: check('activities_accept_ck', sql`accept_status is null or accept_status in ('pendente','aceita','devolvida')`),
@@ -875,8 +892,39 @@ export const activities = pgTable(
     parentIdx: index('activities_parent_idx').on(t.tenantId, t.parentId),
     recurrenceUq: uniqueIndex('activities_recurrence_uq').on(t.tenantId, t.recurrenceKey).where(sql`recurrence_key is not null`),
     linksIdx: index('activities_links_idx').on(t.tenantId, t.contractId, t.arpId),
+    capCk: check('activities_capacity_category_ck', sql`capacity_category is null or capacity_category in ('comercial','interno','hipotese')`),
+    boardCk: check('activities_board_key_ck', sql`board_key is null or board_key in ('comercial','sucesso_cliente','produto','marketing')`),
+    weekIdx: index('activities_planned_week_idx').on(t.tenantId, t.plannedWeek),
   }),
 );
+
+/** Quadros de Tarefas por departamento: equipes que formam o departamento e o limite de tarefas em execução por pessoa. */
+export const taskBoards = pgTable('task_boards', {
+  id: id(),
+  tenantId: tenantId(),
+  key: text('key').notNull(),
+  teamIds: uuid('team_ids').array().notNull().default(sql`'{}'::uuid[]`),
+  /** limite de tarefas em execução ao mesmo tempo por pessoa (padrão 3, como no Marketing) */
+  wipLimit: integer('wip_limit').notNull().default(3),
+  /** aguardando terceiros conta no limite? (o impacto no prazo aparece de qualquer jeito) */
+  wipCountsWaiting: boolean('wip_counts_waiting').notNull().default(false),
+  updatedBy: uuid('updated_by').references(() => users.id),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
+}, (t) => ({ uq: uniqueIndex('task_boards_uq').on(t.tenantId, t.key), keyCk: check('task_boards_key_ck', sql`key in ('comercial','sucesso_cliente','produto','marketing')`) }));
+
+/** Diretriz de capacidade (70/20/10) por quadro, versionada: planejamento encerrado guarda a versão que valia. */
+export const capacityPolicies = pgTable('capacity_policies', {
+  id: id(),
+  tenantId: tenantId(),
+  boardKey: text('board_key').notNull(),
+  version: integer('version').notNull(),
+  commercialBp: integer('commercial_bp').notNull(),
+  internalBp: integer('internal_bp').notNull(),
+  hypothesisBp: integer('hypothesis_bp').notNull(),
+  reason: text('reason').notNull(),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({ uq: uniqueIndex('capacity_policies_uq').on(t.tenantId, t.boardKey, t.version), sumCk: check('capacity_policies_sum_ck', sql`commercial_bp + internal_bp + hypothesis_bp = 10000`) }));
 
 export const activityEvents = pgTable(
   'activity_events',
