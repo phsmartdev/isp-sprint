@@ -1937,6 +1937,11 @@ export const contractAmendments = pgTable('contract_amendments', {
   groupId: uuid('group_id'),
   /** Reajuste aplicado neste aditivo (%, ex.: 4.5). */
   adjustmentPct: doublePrecision('adjustment_pct'),
+  /** reajuste por item: [{ description, pct, fromCents, toCents }] (vazio quando o percentual vale para o contrato todo) */
+  itemAdjustments: jsonb('item_adjustments').$type<{ description: string; pct: number; fromCents: number; toCents: number }[]>(),
+  /** aditivo de prazo por duração: meses e dias somados ao término anterior */
+  extendMonths: integer('extend_months'),
+  extendDays: integer('extend_days'),
   createdBy: uuid('created_by').references(() => users.id),
   createdAt: createdAt(),
 }, (t) => ({ ctIdx: index('contract_amendments_ct_idx').on(t.contractId, t.signedOn), kindCk: check('contract_amendments_kind_ck', inList('kind', ['acrescimo', 'supressao', 'prazo', 'reajuste', 'reequilibrio', 'itens', 'outro'])) }));

@@ -258,6 +258,24 @@ test('aditivos: uso do limite legal de 25% e bloqueio acima dele em contrato pú
   await yv.getByLabel('Observação').fill('Antes do reajuste');
   await yv.getByRole('button', { name: 'Salvar valor' }).click();
   await expect(yv.getByText(/900,00\/mês/)).toBeVisible();
+  // aditivo de prazo por duração (+12 meses) e reajuste só num item
+  const endBefore = (await (await api.get(`/api/v1/contracts/${id}`)).json()).current.endAt as string;
+  await sec.getByRole('button', { name: 'Registrar aditivo' }).click();
+  const dlg2 = page.getByRole('dialog', { name: 'Registrar termo aditivo' });
+  await dlg2.getByLabel('Número do aditivo').fill('2');
+  await dlg2.getByRole('checkbox', { name: /Prorrogação de prazo/ }).check();
+  await expect(dlg2.getByRole('radio', { name: 'Somar ao prazo atual' })).toBeChecked();
+  await dlg2.getByLabel('Meses').fill('12');
+  await expect(dlg2.getByLabel('Prazo do aditivo')).toContainText('novo término');
+  await dlg2.getByRole('checkbox', { name: /^Reajuste/ }).check();
+  await dlg2.getByRole('radio', { name: 'Itens específicos' }).check();
+  await dlg2.getByLabel('Reajuste de Link (%)').fill('5');
+  await dlg2.getByLabel('Objeto do aditivo').fill('Prorrogação por 12 meses e reajuste do link');
+  await dlg2.getByRole('button', { name: 'Registrar aditivo' }).click();
+  await expect(sec).toContainText('Prazo +12 meses');
+  await expect(sec).toContainText('Reajuste por item: Link 5%');
+  const after = (await (await api.get(`/api/v1/contracts/${id}`)).json()).current;
+  expect(after.endAt > endBefore).toBe(true);
   await page.getByRole('tab', { name: /Versões/ }).click();
   await expect(page.getByText('Termo aditivo').first()).toBeVisible();
 });
