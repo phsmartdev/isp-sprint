@@ -202,9 +202,12 @@ export function ContractForm({ value, onChange, editing, validated, contactId }:
   );
   // contrato validado: dados contratuais só mudam por aditivo (a API recusa); fica editável o cadastro operacional
   const lock = !!(editing && validated);
+  // vazio no contrato validado ainda pode ser preenchido (ex.: data-base do reajuste que faltou)
+  const [initial] = useState(f);
+  const lockIf = (v: string) => lock && v.trim() !== '';
   return (
     <div className="space-y-4">
-      {lock && <p className="border-l-4 border-l-primary bg-primary-soft px-3 py-2 text-sm text-ink" role="note"><strong>Contrato validado.</strong> Objeto, vigência, produtos, valores, reajuste e condições só mudam por aditivo (aba Aditivos). Aqui você ajusta responsáveis, próxima ação, ativação, faturamento, endereços, relatório, garantia e Zenith.</p>}
+      {lock && <p className="border-l-4 border-l-primary bg-primary-soft px-3 py-2 text-sm text-ink" role="note"><strong>Contrato validado.</strong> Objeto, vigência, produtos, valores, reajuste e condições só mudam por aditivo (aba Aditivos); campo de reajuste que ainda está vazio pode ser preenchido aqui. Aqui você ajusta responsáveis, próxima ação, ativação, faturamento, endereços, relatório, garantia e Zenith.</p>}
       <Fieldset title="Contrato" disabled={lock}>
         <FormField label="Número do contrato" htmlFor="cf-number" required><Input id="cf-number" value={f.number} onChange={(e) => onChange({ number: e.target.value })} placeholder="Ex.: 045/2025" /></FormField>
         <FormField label="Tipo de contrato" htmlFor="cf-btype" hint={BILLING_TYPE_HINTS[f.billingType]}>
@@ -298,11 +301,11 @@ export function ContractForm({ value, onChange, editing, validated, contactId }:
         <FormField label="Condições de faturamento" htmlFor="cf-bterms" className="sm:col-span-2 lg:col-span-3"><Textarea id="cf-bterms" className="min-h-[60px]" value={f.billingTerms} onChange={(e) => onChange({ billingTerms: e.target.value })} placeholder="Ex.: fatura mensal, vencimento em 30 dias, medição até o dia 5" /></FormField>
       </Fieldset>
 
-      <Fieldset title="Reajuste" disabled={lock} hint="Regra própria deste contrato. Reajuste é diferente de repactuação e revisão.">
-        <FormField label="Índice" htmlFor="cf-idx"><Input id="cf-idx" value={f.adjustmentIndex} onChange={(e) => onChange({ adjustmentIndex: e.target.value })} placeholder="IPCA, IGP-M, IST..." /></FormField>
-        <FormField label="Data-base" htmlFor="cf-base"><Input id="cf-base" type="date" value={f.adjustmentBaseDate} onChange={(e) => onChange({ adjustmentBaseDate: e.target.value })} /></FormField>
-        <FormField label="Regra" htmlFor="cf-rule" className="sm:col-span-2 lg:col-span-1"><Input id="cf-rule" value={f.adjustmentRule} onChange={(e) => onChange({ adjustmentRule: e.target.value })} placeholder="Ex.: anual, 12 meses da proposta" /></FormField>
-        <FormField label="Cláusula de renovação" htmlFor="cf-renewal" className="sm:col-span-2 lg:col-span-3" hint="Texto da cláusula do contrato. Vira a variável {{contrato.clausula_renovacao}} dos ofícios"><Textarea id="cf-renewal" rows={3} maxLength={4000} value={f.renewalClause} onChange={(e) => onChange({ renewalClause: e.target.value })} placeholder="Ex.: Cláusula Sexta – O presente contrato poderá ser prorrogado por iguais e sucessivos períodos, até o limite de 120 meses, nos termos do art. 107 da Lei nº 14.133/2021." /></FormField>
+      <Fieldset title="Reajuste" hint="Regra própria deste contrato. Reajuste é diferente de repactuação e revisão.">
+        <FormField label="Índice" htmlFor="cf-idx"><Input id="cf-idx" disabled={lockIf(initial.adjustmentIndex)} value={f.adjustmentIndex} onChange={(e) => onChange({ adjustmentIndex: e.target.value })} placeholder="IPCA, IGP-M, IST..." /></FormField>
+        <FormField label="Data-base" htmlFor="cf-base"><Input id="cf-base" disabled={lockIf(initial.adjustmentBaseDate)} type="date" value={f.adjustmentBaseDate} onChange={(e) => onChange({ adjustmentBaseDate: e.target.value })} /></FormField>
+        <FormField label="Regra" htmlFor="cf-rule" className="sm:col-span-2 lg:col-span-1"><Input id="cf-rule" disabled={lockIf(initial.adjustmentRule)} value={f.adjustmentRule} onChange={(e) => onChange({ adjustmentRule: e.target.value })} placeholder="Ex.: anual, 12 meses da proposta" /></FormField>
+        <FormField label="Cláusula de renovação" htmlFor="cf-renewal-clause" className="sm:col-span-2 lg:col-span-3" hint="Texto da cláusula do contrato. Vira a variável {{contrato.clausula_renovacao}} dos ofícios"><Textarea id="cf-renewal-clause" disabled={lockIf(initial.renewalClause)} rows={3} maxLength={4000} value={f.renewalClause} onChange={(e) => onChange({ renewalClause: e.target.value })} placeholder="Ex.: Cláusula Sexta – O presente contrato poderá ser prorrogado por iguais e sucessivos períodos, até o limite de 120 meses, nos termos do art. 107 da Lei nº 14.133/2021." /></FormField>
       </Fieldset>
 
       <Fieldset title="Responsáveis">

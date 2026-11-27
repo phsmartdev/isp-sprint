@@ -862,8 +862,11 @@ export const contractRoutes = [
       }
       // depois de validado, os dados contratuais travam: só mudam por aditivo (27/11/2026). Cadastro operacional segue editável.
       if (c.validatedAt) {
-        const lockedV = body.version ? Object.keys(body.version).filter((k) => (CONTRACT_LOCKED_FIELDS as readonly string[]).includes(k)) : [];
-        const lockedH = (['kind', 'billingType', 'legalRegime', 'legalLimitAt', 'renewalClause'] as const).filter((k) => body[k] !== undefined && JSON.stringify(body[k] ?? null) !== JSON.stringify((c as Record<string, unknown>)[k] ?? null));
+        // campo ainda vazio pode ser preenchido (completar o cadastro não é mudar o contrato); o que já tem valor só por aditivo
+        const empty = (v: unknown) => v === null || v === undefined || v === '' || (Array.isArray(v) && !v.length);
+        const curV = body.version ? (await currentVersion(app.db, c)) as unknown as Record<string, unknown> : {};
+        const lockedV = body.version ? Object.keys(body.version).filter((k) => (CONTRACT_LOCKED_FIELDS as readonly string[]).includes(k) && !empty(curV[k])) : [];
+        const lockedH = (['kind', 'billingType', 'legalRegime', 'legalLimitAt', 'renewalClause'] as const).filter((k) => body[k] !== undefined && JSON.stringify(body[k] ?? null) !== JSON.stringify((c as Record<string, unknown>)[k] ?? null) && (k === 'kind' || k === 'billingType' || k === 'legalRegime' || !empty((c as Record<string, unknown>)[k])));
         const locked = [...lockedH, ...lockedV];
         if (locked.length) throw unprocessable(`Contrato validado: ${locked.map((k) => CONTRACT_FIELD_LABELS[k] ?? k).join(', ')} só muda${locked.length > 1 ? 'm' : ''} por aditivo.`, locked.map((k) => ({ path: k, message: 'Só por aditivo' })));
       }
