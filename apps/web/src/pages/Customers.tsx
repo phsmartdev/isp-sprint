@@ -113,7 +113,7 @@ export function CustomersPage() {
             {lookups.data?.users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
           </Select>
         )}
-        <Button size="lg" className="ml-auto" icon={<SlidersHorizontal className="h-5 w-5" />} onClick={() => { setSearch(''); setF({ q: '', planId: '', lifecycle: '', segment: '', ownerId: '' }); }} title="Limpar filtros">Filtros</Button>
+        {(f.q || f.planId || f.lifecycle || f.segment || f.ownerId || search) && <Button size="lg" variant="ghost" className="ml-auto" icon={<SlidersHorizontal className="h-5 w-5" />} onClick={() => { setSearch(''); setF({ q: '', planId: '', lifecycle: '', segment: '', ownerId: '' }); }}>Limpar filtros</Button>}
       </div>
 
       {selected.size > 0 && (
