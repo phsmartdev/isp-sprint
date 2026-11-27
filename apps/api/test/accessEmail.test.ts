@@ -29,14 +29,16 @@ afterAll(async () => {
 
 describe('e-mail de cadastro do usuário', () => {
   it('monta o HTML com os dados de acesso e escapa o que vem do cadastro', () => {
-    const html = accessEmailHtml({ kind: 'convite_usuario', name: 'Ana <b>Teste</b>', email: 'ana@exemplo.test', password: 'Tmp-123', loginUrl: 'https://revops.exemplo.test/login', wikiUrl: 'https://revops.exemplo.test/playbooks', logoUrl: 'https://revops.exemplo.test/brand/bkt-logo-white.png', company: 'BKT' });
-    expect(html).toContain('Olá, Ana!');
+    const html = accessEmailHtml({ kind: 'convite_usuario', name: 'Ana <b>Teste</b>', email: 'ana@exemplo.test', password: 'Tmp-123', loginUrl: 'https://revops.exemplo.test/login', wikiUrl: 'https://revops.exemplo.test/playbooks', logoUrl: 'https://revops.exemplo.test/brand/bkt-logo.png', company: 'BKT', message: 'Olá, Ana <b>Teste</b>!\n\nVeja a wiki: https://revops.exemplo.test/playbooks' });
+    expect(html).toContain('Olá, Ana &lt;b&gt;Teste&lt;/b&gt;!');
     expect(html).not.toContain('<b>Teste</b>');
     expect(html).toContain('Tmp-123');
     expect(html).toContain('ana@exemplo.test');
     expect(html).toContain('href="https://revops.exemplo.test/login"');
     expect(html).toContain('href="https://revops.exemplo.test/playbooks"');
-    expect(html).toContain('Wiki RevOps');
+    expect(html).toContain('Abrir a wiki');
+    // cabeçalho claro: sem a faixa escura em degradê
+    expect(html).not.toContain('linear-gradient');
     expect(html).not.toContain('border-radius');
   });
 
@@ -57,5 +59,28 @@ describe('e-mail de cadastro do usuário', () => {
     // versão em texto: dados de acesso, wiki e a assinatura em texto
     expect(m.text).toContain(r.temporaryPassword);
     expect(m.text).toContain('Carlos Silva');
+  });
+
+  it('modelo editável na tela: salva o texto, vira a mensagem do e-mail e o quadro de acesso continua', async () => {
+    const list = ok(await carlos.get('/admin/email-templates')).json();
+    const conv = list.items.find((i: { key: string }) => i.key === 'convite_usuario');
+    expect(conv.accessBox).toBe(true);
+    expect(conv.variables).toContain('senha_temporaria');
+    expect(ok(await carlos.put('/admin/email-templates/convite_usuario', { assunto: 'Acesso {{empresa.nome}}', corpo: 'Olá {{nome_errado}}' }), 422).body).toMatch(/nome_errado/);
+    const corpo = `Oi, {{usuario.nome}}! Bem-vindo ao time ${st}.`;
+    const preview = ok(await carlos.post('/admin/email-templates/convite_usuario/preview', { assunto: 'Acesso {{empresa.nome}}', corpo })).json();
+    expect(preview.html).toContain(`Oi, Maria Exemplo! Bem-vindo ao time ${st}.`);
+    expect(preview.html).toContain('Exemplo-1234');
+    const saved = ok(await carlos.put('/admin/email-templates/convite_usuario', { assunto: 'Acesso {{empresa.nome}}', corpo })).json();
+    expect(saved.changed).toBe(true);
+    const email = `novo2.${st}@exemplo.test`;
+    const r = ok(await carlos.post('/admin/users', { name: `Pessoa Dois ${st}`, email, jobTitle: null, phone: null, profile: 'operacao', teamIds: [], leadTeamIds: [], sectors: [], isCsm: false, playbookRoles: [], goalSales: 0, goalProposals: 0, goalLeads: 0 }), 201).json();
+    const m = sent.find((x) => x.to === email)!;
+    expect(m.subject).toMatch(/^Acesso /);
+    expect(m.html).toContain(`Bem-vindo ao time ${st}.`);
+    expect(m.html).toContain(r.temporaryPassword);
+    expect(m.text).toContain(`Senha temporária: ${r.temporaryPassword}`);
+    // volta ao padrão para não afetar outros testes
+    ok(await carlos.put('/admin/email-templates/convite_usuario', conv.default));
   });
 });

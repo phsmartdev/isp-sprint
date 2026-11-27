@@ -8,6 +8,7 @@ import { fmtDateTime } from '../../lib/format';
 import { useAuth } from '../../auth/AuthProvider';
 import { Button, Chip, ErrorState, FormField, Input, LoadingRows, Notice, Pagination } from '../../components/ui/primitives';
 import { useToast } from '../../components/ui/overlay';
+import { SystemEmailTemplates } from '../../features/settings/SystemEmailTemplates';
 
 type Smtp = { configured: false } | { configured: true; host: string; port: number; secure: boolean; username: string | null; fromName: string; fromEmail: string; replyTo: string | null; enabled: boolean; hasPassword: boolean; lastTestAt: string | null; lastTestOk: boolean | null; lastTestError: string | null; updatedAt: string };
 type Notif = { activityDigest: boolean; leadAssigned: boolean; dealWon: boolean; userAccess: boolean; smtpConfigured: boolean; cronConfigured: boolean };
@@ -99,7 +100,7 @@ function Notifications() {
   return (
     <section className="card p-5">
       <h2 className="text-lg font-bold text-ink">Alertas automáticos</h2>
-      <p className="mb-3 text-sm text-muted">Os textos de cada e-mail ficam no modelo de instrução (seção “emails”). O sino do topo continua mostrando as atividades do dia.</p>
+      <p className="mb-3 text-sm text-muted">Os textos de cada e-mail se editam em “Modelos de e-mail do sistema”, logo abaixo. O sino do topo continua mostrando as atividades do dia.</p>
       {!n.smtpConfigured && <div className="mb-3"><Notice tone="warning">Configure o SMTP acima: sem ele nenhum alerta é enviado.</Notice></div>}
       {!n.cronConfigured && <div className="mb-3"><Notice>O resumo diário e as automações de “parada há X dias” precisam do agendamento ligado no servidor (variável CRON_SECRET).</Notice></div>}
       <ul className="divide-y divide-line rounded-md border border-line">
@@ -110,7 +111,6 @@ function Notifications() {
           </li>
         ))}
       </ul>
-      <p className="mt-3 text-sm text-muted">Quer mudar os textos? <Link className="link" to="/settings/modelos?aba=instrucao">Exporte o modelo de instrução</Link>, edite e envie de volta.</p>
     </section>
   );
 }
@@ -156,6 +156,7 @@ export function AdminEmail() {
       </section>
       <SmtpForm />
       <Notifications />
+      <SystemEmailTemplates />
       <EmailLog />
     </div>
   );

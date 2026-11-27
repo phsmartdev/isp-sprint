@@ -31,6 +31,25 @@ export const EMAIL_TEMPLATE_LABELS: Record<EmailTemplateKey, string> = {
   alerta_venda_fechada: 'Alerta de venda fechada',
 };
 
+/**
+ * Texto padrão dos e-mails de acesso. O link, o usuário e a senha temporária vão num quadro à parte, que o sistema
+ * monta sozinho (não dá para tirar do e-mail): o texto aqui é a mensagem em volta.
+ */
+export const ACCESS_EMAIL_BODIES = {
+  convite_usuario: 'Olá, {{usuario.nome}}!\n\nVocê foi cadastrado no RevOps da {{empresa.nome}}, a central de gestão comercial: funil, propostas, contratos, pós-venda, marketing e gestão do time num lugar só.\n\nNo primeiro acesso:\n1. Entre com o usuário e a senha temporária deste e-mail (ou use Entrar com Google, se o seu e-mail for uma conta Google).\n2. Troque a senha em Meu perfil. A senha temporária é só para este primeiro acesso.\n3. Se quiser, faça o Tour RevOps, no menu lateral, para conhecer as telas.\n\nDúvidas sobre o uso? A wiki (Central de Playbooks) tem o manual do sistema e o passo a passo de cada tela: {{link_wiki}}',
+  nova_senha: 'Olá, {{usuario.nome}}!\n\nGeramos uma nova senha temporária para o seu acesso ao RevOps. A senha anterior deixou de valer.\n\nEntre com a senha temporária deste e-mail e troque a senha em Meu perfil.',
+} as const;
+/** Textos padrão antigos (com usuário e senha no meio do texto): quem não editou passa a ver o padrão novo. */
+const LEGACY_ACCESS_BODIES: Partial<Record<EmailTemplateKey, string>> = {
+  convite_usuario: 'Olá, {{usuario.nome}}!\n\nSeu acesso ao RevOps foi criado.\n\nLink de acesso: {{link}}\nUsuário: {{usuario.email}}\nSenha temporária: {{senha_temporaria}}\n\nNo primeiro acesso, troque a senha em Meu perfil.\n\nDúvidas sobre o uso? A wiki (Central de Playbooks) tem o manual do sistema e o passo a passo de cada tela: {{link_wiki}}',
+  nova_senha: 'Olá, {{usuario.nome}}!\n\nSua nova senha temporária é {{senha_temporaria}}.\nEntre em {{link}} e troque a senha em Meu perfil.',
+};
+export function emailTemplateOf(i: Pick<Instruction, 'emails'>, key: EmailTemplateKey) {
+  const t = i.emails.modelos[key];
+  const legacy = LEGACY_ACCESS_BODIES[key];
+  return legacy && t.corpo === legacy ? { ...t, corpo: ACCESS_EMAIL_BODIES[key as keyof typeof ACCESS_EMAIL_BODIES] } : t;
+}
+
 /** Variáveis disponíveis em cada modelo de e-mail ({{variavel}}). */
 export const EMAIL_VARIABLES: Record<EmailTemplateKey, string[]> = {
   proposta: ['cliente.nome', 'vendedor.nome', 'vendedor.email', 'plano.nome', 'plano.valor', 'empresa.nome'],
@@ -460,8 +479,8 @@ export function defaultInstruction(): Instruction {
       modelos: {
         proposta: t('Sua proposta {{empresa.nome}} — {{plano.nome}}', 'Olá, {{cliente.nome}}!\n\nConforme conversamos, segue em anexo a proposta do plano {{plano.nome}} por {{plano.valor}} por mês.\n\nQualquer dúvida, é só responder este e-mail.\n\n{{vendedor.nome}}\n{{empresa.nome}}'),
         followup: t('{{cliente.nome}}, conseguiu ver a proposta?', 'Olá, {{cliente.nome}}!\n\nPassando para saber se ficou alguma dúvida sobre o plano {{plano.nome}}. Posso ajudar com algo?\n\n{{vendedor.nome}}\n{{empresa.nome}}'),
-        convite_usuario: t('Seu acesso ao RevOps — {{empresa.nome}}', 'Olá, {{usuario.nome}}!\n\nSeu acesso ao RevOps foi criado.\n\nLink de acesso: {{link}}\nUsuário: {{usuario.email}}\nSenha temporária: {{senha_temporaria}}\n\nNo primeiro acesso, troque a senha em Meu perfil.\n\nDúvidas sobre o uso? A wiki (Central de Playbooks) tem o manual do sistema e o passo a passo de cada tela: {{link_wiki}}'),
-        nova_senha: t('Nova senha temporária — {{empresa.nome}}', 'Olá, {{usuario.nome}}!\n\nSua nova senha temporária é {{senha_temporaria}}.\nEntre em {{link}} e troque a senha em Meu perfil.'),
+        convite_usuario: t('Seu acesso ao RevOps — {{empresa.nome}}', ACCESS_EMAIL_BODIES.convite_usuario),
+        nova_senha: t('Nova senha temporária — {{empresa.nome}}', ACCESS_EMAIL_BODIES.nova_senha),
         alerta_atividades: t('Você tem {{quantidade}} atividade(s) para hoje ou vencida(s)', 'Olá, {{usuario.nome}}!\n\n{{lista}}\n\nVeja em {{link}}'),
         alerta_lead_atribuido: t('Novo lead para você: {{lead.nome}}', 'Olá, {{usuario.nome}}!\n\n{{atribuido_por}} atribuiu o lead {{lead.nome}} ({{lead.telefone}}) para você.\n\nAbra em {{link}}'),
         alerta_venda_fechada: t('Venda fechada: {{cliente.nome}}', 'Olá, {{usuario.nome}}!\n\n{{vendedor.nome}} fechou a venda do plano {{plano.nome}} ({{plano.valor}}/mês) com {{cliente.nome}}.\n\nVeja em {{link}}'),

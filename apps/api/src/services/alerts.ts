@@ -1,5 +1,5 @@
 /** Alertas automáticos por e-mail. Respeitam as chaves em Configurações → Notificações. */
-import { accessEmailHtml } from './accessEmail';
+import { accessEmailHtml, accessPlainText } from './accessEmail';
 import { signatureAttachment, signatureHtml, signatureOf } from './mailSignature';
 import { and, eq, isNull, lte, sql } from 'drizzle-orm';
 import type { Config } from '../config';
@@ -58,12 +58,13 @@ export async function notifyUserAccess(db: DbOrTx, config: Config, auth: AuthCon
   const mail = await renderEmail(db, auth.tenantId, kind, {
     'usuario.nome': user.name, 'usuario.email': user.email, senha_temporaria: password, link: loginUrl, link_wiki: wikiUrl, 'empresa.nome': company,
   });
-  // texto editável em Configurações vai como versão em texto; o HTML segue o visual da ferramenta
+  // a mensagem é a do modelo editável; o quadro de acesso (link, usuário e senha) o sistema monta sempre
   // assinatura de quem cadastrou, a mesma do E-mail (imagem embutida, como a programada na caixa do Gmail)
   const sig = await signatureOf(db, auth.userId);
   const sigHtml = signatureHtml(sig);
-  const html = accessEmailHtml({ kind, name: user.name, email: user.email, password, loginUrl, wikiUrl, logoUrl: publicLink(config, '/brand/bkt-logo-white.png'), company, signatureHtml: sigHtml || undefined });
-  const text = sig.text ? `${mail.text.trimEnd()}\n\n-- \n${sig.text}` : mail.text;
+  const html = accessEmailHtml({ kind, name: user.name, email: user.email, password, loginUrl, wikiUrl, logoUrl: publicLink(config, '/brand/bkt-logo.png'), company, message: mail.text, signatureHtml: sigHtml || undefined });
+  const plain = accessPlainText(mail.text, { loginUrl, email: user.email, password });
+  const text = sig.text ? `${plain.trimEnd()}\n\n-- \n${sig.text}` : plain;
   const r = await sendAlert(db, { tenantId: auth.tenantId, kind, to: user.email, subject: mail.subject, text, html, attachments: signatureAttachment(sig), createdBy: auth.userId });
   return !!r?.ok;
 }
