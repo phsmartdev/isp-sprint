@@ -18,10 +18,11 @@ import { Avatar, Button, Chip, EmptyState, ErrorState, FormField, Input, Loading
 import { Modal, useToast } from '../../components/ui/overlay';
 import { errMsg } from '../../features/contracts/shared';
 import { TaskDrawer } from '../../features/tasks/TaskDrawer';
+import { ProjectDepartments } from '../../features/projects/Departments';
 import { HomologationDialog, RisksAndImpediments } from '../../features/projects/governance';
 import { HealthChip, LinkChips, PRIORITY_LABELS, ProgressBar, STATUS_TONE, type Milestone, type ProjectDetail, type Stage, type Task } from '../../features/projects/shared';
 
-type TabKey = 'quadro' | 'lista' | 'calendario' | 'linha' | 'responsavel' | 'marcos' | 'riscos' | 'equipe' | 'documentos' | 'orcamento' | 'historico';
+type TabKey = 'quadro' | 'lista' | 'calendario' | 'linha' | 'responsavel' | 'departamentos' | 'marcos' | 'riscos' | 'equipe' | 'documentos' | 'orcamento' | 'historico';
 const todayIso = () => new Date().toLocaleDateString('en-CA');
 const PRIO_TONE = { baixa: 'neutral', media: 'sky', alta: 'red' } as const;
 
@@ -85,7 +86,7 @@ export function ProjectDetailPage() {
       </header>
 
       <Tabs label="Visões do projeto" value={u.t as TabKey} onChange={(t) => setU({ t }, { resetPage: false })} tabs={[
-        { key: 'quadro', label: 'Quadro' }, { key: 'lista', label: 'Lista', count: p.tasks.length }, { key: 'calendario', label: 'Calendário' }, { key: 'linha', label: 'Linha do tempo' }, { key: 'responsavel', label: 'Por responsável' },
+        { key: 'quadro', label: 'Quadro' }, { key: 'lista', label: 'Lista', count: p.tasks.length }, { key: 'calendario', label: 'Calendário' }, { key: 'linha', label: 'Linha do tempo' }, { key: 'responsavel', label: 'Por responsável' }, { key: 'departamentos', label: 'Departamentos' },
         { key: 'marcos', label: 'Marcos', count: p.milestones.length }, { key: 'riscos', label: 'Riscos e impedimentos' }, { key: 'equipe', label: 'Equipe', count: p.members.length }, { key: 'documentos', label: 'Documentos' }, { key: 'orcamento', label: 'Orçamento' }, { key: 'historico', label: 'Histórico' },
       ]} />
 
@@ -101,6 +102,7 @@ export function ProjectDetailPage() {
       {u.t === 'calendario' && <Calendar p={p} onOpen={openTask} />}
       {u.t === 'linha' && <Timeline p={p} onOpen={openTask} />}
       {u.t === 'responsavel' && <ByOwner p={p} onOpen={openTask} />}
+      {u.t === 'departamentos' && <ProjectDepartments projectId={p.id} onOpen={setDrawer} />}
       {u.t === 'documentos' && <ProjectFiles p={p} />}
       {u.t === 'marcos' && <Milestones p={p} />}
       {u.t === 'riscos' && <RisksAndImpediments projectId={p.id} />}

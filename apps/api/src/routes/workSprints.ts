@@ -21,8 +21,8 @@ import * as s from '../db/schema';
 import { audit } from '../services/audit';
 import { taskEvent } from '../services/tasks';
 import { dueAtOf } from '../services/projects';
-import { activityScope } from '../services/tasks';
-import { assertBoardOpen, boardRole, boardsConfig, capacityPolicy, teamsByUser, ymd } from './workBoards';
+import { warnDependents } from '../services/dependencies';
+import { assertBoardOpen, boardRole, boardScope, boardsConfig, capacityPolicy, teamsByUser, ymd } from './workBoards';
 
 export const Board = z.object({ board: z.enum(BOARD_KEYS) });
 export const isoDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -72,7 +72,7 @@ export async function boardOpenTasks(db: DbOrTx, auth: AuthContext, board: Board
     .leftJoin(s.opportunities, eq(s.opportunities.id, s.activities.opportunityId))
     .leftJoin(oppOwner, eq(oppOwner.id, s.opportunities.ownerId))
     .leftJoin(s.contacts, eq(s.contacts.id, s.activities.contactId))
-    .where(and(activityScope(auth), isNull(s.activities.parentId), sql`${s.activities.status} not in ('concluida','cancelada')`,
+    .where(and(boardScope(auth, ctx.role), isNull(s.activities.parentId), sql`${s.activities.status} not in ('concluida','cancelada')`,
       or(eq(s.activities.boardKey, board), and(isNull(s.activities.boardKey), ctx.members.length ? inArray(s.activities.ownerId, ctx.members) : sql`false`))!, extra))
     .orderBy(sql`${s.activities.planOrder} asc nulls last`, sql`${s.activities.dueAt} asc nulls last`).limit(800);
   return rows.filter((r) => boardOfTask({ boardKey: r.a.boardKey, ownerTeamIds: ctx.byUser.get(r.a.ownerId) ?? [] }, ctx.boards) === board);
@@ -191,6 +191,7 @@ export const workSprintRoutes = [
               updatedAt: new Date(), rowVersion: sql`${s.activities.rowVersion} + 1`,
             }).where(eq(s.activities.id, r.a.id));
             if (Object.keys(changes).length) await taskEvent(tx, auth, r.a.id, 'planejamento', { semana: week, ...changes });
+            if (changes.prazo) await warnDependents(tx, auth, r.a.id, `teve o prazo alterado no planejamento para ${(it.dueOn ?? '').split('-').reverse().join('/') || 'sem prazo'}`);
           } else if (r.a.plannedWeek === week) {
             await tx.update(s.activities).set({ plannedWeek: null, planOrder: null, updatedAt: new Date(), rowVersion: sql`${s.activities.rowVersion} + 1` }).where(eq(s.activities.id, r.a.id));
             await taskEvent(tx, auth, r.a.id, 'planejamento', { retiradaDaSemana: week });
@@ -253,6 +254,7 @@ export const workSprintRoutes = [
         if (!it) throw notFound('A tarefa não está na Sprint.');
         await tx.update(s.activities).set({ plannedWeek: null, planOrder: null, updatedAt: new Date(), rowVersion: sql`${s.activities.rowVersion} + 1` }).where(eq(s.activities.id, body.activityId));
         await taskEvent(tx, auth, body.activityId, 'replanejada', { sprint: sp.weekStart, reason: body.reason });
+        await warnDependents(tx, auth, body.activityId, `saiu da Sprint: ${body.reason}`);
         await sprintEvent(tx, auth, sp.id, 'retirada', { activityId: body.activityId, minutes: it.committedMinutes, category: it.category }, body.reason);
         return { ok: true };
       });

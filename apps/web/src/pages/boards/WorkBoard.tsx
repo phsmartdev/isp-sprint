@@ -8,7 +8,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { DndContext, KeyboardSensor, PointerSensor, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import clsx from 'clsx';
-import { AlarmClock, Briefcase, CalendarRange, Eye, KanbanSquare, Lock, Plus, Search, ShieldCheck, Users, Zap } from 'lucide-react';
+import { AlarmClock, Briefcase, CalendarRange, Eye, KanbanSquare, Link2, Lock, Plus, Search, ShieldCheck, Users, Zap } from 'lucide-react';
 import {
   BOARD_COLUMNS, BOARD_COLUMN_LABELS, BOARD_KEYS, BOARD_LABELS, CAPACITY_CATEGORIES, CAPACITY_CATEGORY_LABELS, CAPACITY_CATEGORY_SHORT, COLUMN_STATUS, TASK_ORIGINS, TASK_ORIGIN_LABELS,
   SPRINT_STATUS_LABELS, fmtMinutes, type BoardColumn, type BoardKey, type CapacityCategory, type TaskOrigin,
@@ -29,7 +29,7 @@ import { useAuth } from '../../auth/AuthProvider';
 type Item = {
   id: string; ref: string; title: string; type: string; status: string; column: BoardColumn; rowVersion: number; ownerId: string; ownerName: string | null; priority: string;
   dueAt: string | null; dueDay: string | null; agreedDueAt: string | null; category: CapacityCategory | null; categoryAuto: boolean; estimateMinutes: number | null; remainingMinutes: number | null;
-  origin: TaskOrigin; commercial: boolean; planned: boolean; blocked: boolean; waitingOn: string | null; protectedCommitment: boolean; overdue: boolean; dueToday: boolean; observers?: number;
+  origin: TaskOrigin; commercial: boolean; planned: boolean; blocked: boolean; waitingOn: string | null; protectedCommitment: boolean; overdue: boolean; dueToday: boolean; observers?: number; depOpen?: number; depRisk?: boolean;
   link: { kind: string; label: string; to: string; valueCents?: number | null; stage?: string | null } | null; readOnly: boolean;
 };
 type Data = {
@@ -226,6 +226,8 @@ function CardView({ i, onOpen }: { i: Item; onOpen: () => void }) {
         {i.category ? <span className={clsx('px-1.5 py-0.5 text-2xs font-bold', CAT_COLOR[i.category])} title={i.categoryAuto ? 'Automática: ligada a oportunidade' : undefined}>{CAPACITY_CATEGORY_SHORT[i.category]}</span> : <span className="bg-surface-2 px-1.5 py-0.5 text-2xs font-semibold text-muted">Sem categoria</span>}
         {i.commercial && <span className="inline-flex items-center gap-0.5 bg-primary-soft px-1.5 py-0.5 text-2xs font-bold text-primary"><Briefcase className="h-3 w-3" aria-hidden />CRM</span>}
         {i.blocked && <span className="inline-flex items-center gap-0.5 bg-[#FEF3C7] px-1.5 py-0.5 text-2xs font-bold text-[#92400E]" title={i.waitingOn ?? undefined}><Lock className="h-3 w-3" aria-hidden />Bloqueada</span>}
+        {i.depRisk ? <span className="inline-flex items-center gap-0.5 bg-danger-soft px-1.5 py-0.5 text-2xs font-bold text-danger" title="Uma predecessora está atrasada ou termina depois do prazo desta"><Link2 className="h-3 w-3" aria-hidden />Dependência em risco</span>
+          : i.depOpen ? <span className="inline-flex items-center gap-0.5 bg-surface-2 px-1.5 py-0.5 text-2xs font-bold text-ink" title="Aguarda tarefas de que depende"><Link2 className="h-3 w-3" aria-hidden />Depende de {i.depOpen}</span> : null}
         {i.protectedCommitment && <span className="inline-flex items-center gap-0.5 bg-surface-2 px-1.5 py-0.5 text-2xs font-bold text-ink" title="Compromisso protegido"><ShieldCheck className="h-3 w-3" aria-hidden />Protegido</span>}
         {i.priority === 'alta' && <span className="bg-danger-soft px-1.5 py-0.5 text-2xs font-bold text-danger">Alta</span>}
       </div>

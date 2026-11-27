@@ -18,10 +18,10 @@ import { Avatar, Button, Chip, FormField, Input, LoadingRows, Notice, Select, Te
 import { Drawer, useToast } from '../../components/ui/overlay';
 import { MentionInput, mentionsIn, type Participant } from '../MentionInput';
 import { errMsg } from '../contracts/shared';
-import { TaskPlanning, type TaskPlanningData } from './TaskPlanning';
+import { TaskPlanning, useBoards, type TaskPlanningData } from './TaskPlanning';
 import { NewTaskDialog, PRIO_LABEL, TaskStatusChip, useInvalidateTasks, type TaskItem, type TaskList } from './shared';
 
-type Dep = { id: string; title: string; status: TaskStatus; ownerName: string };
+type Dep = { id: string; title: string; status: TaskStatus; ownerName: string; ref?: string; dueDay?: string | null; boardLabel?: string | null; stateLabel?: string; atRisk?: boolean; state?: string };
 type Detail = TaskItem & {
   subtasks: TaskItem[]; blockedBy: Dep[]; blocking: Dep[]; blockers: string[];
   comments: { id: string; body: string; createdAt: string; authorId: string | null; authorName: string | null }[];
@@ -340,17 +340,29 @@ function Dependencies({ t, onOpen }: { t: Detail; onOpen: (id: string) => void }
   const toast = useToast();
   const invalidate = useInvalidateTasks();
   const [search, setSearch] = useState('');
-  const found = useQuery({ queryKey: ['tasks', 'dep-search', search], enabled: search.trim().length >= 2, queryFn: () => api<TaskList>(`/tasks${qs({ view: 'todas', q: search })}`) });
+  const boards = useBoards();
+  const crossBoards = !!boards.data?.items.length;
+  // com Quadros de Tarefas ligados, a busca alcança tarefas de outros departamentos (os times se conversam)
+  const found = useQuery({ queryKey: ['tasks', 'dep-search', search, crossBoards], enabled: search.trim().length >= 2, queryFn: async () => {
+    const own = await api<TaskList>(`/tasks${qs({ view: 'todas', q: search })}`);
+    if (!crossBoards) return own.items.map((x) => ({ id: x.id, title: x.title, ownerName: x.ownerName, boardLabel: null as string | null }));
+    const other = await api<{ items: { id: string; title: string; ownerName: string; boardLabel: string | null }[] }>(`/quadros/dependencias/busca${qs({ q: search })}`);
+    const map = new Map(own.items.map((x) => [x.id, { id: x.id, title: x.title, ownerName: x.ownerName, boardLabel: null as string | null }]));
+    for (const o of other.items) map.set(o.id, o);
+    return [...map.values()];
+  } });
   const add = useMutation({ mutationFn: (dependsOnId: string) => api(`/tasks/${t.id}/dependencies`, { method: 'POST', body: { dependsOnId } }), onSuccess: () => { invalidate(); setSearch(''); }, onError: (e) => toast({ tone: 'error', message: errMsg(e) }) });
   const del = useMutation({ mutationFn: (dependsOnId: string) => api(`/tasks/${t.id}/dependencies/${dependsOnId}`, { method: 'DELETE' }), onSuccess: invalidate, onError: (e) => toast({ tone: 'error', message: errMsg(e) }) });
   const row = (d: Dep, removable: boolean) => (
     <li key={d.id} className="flex items-center gap-2 text-sm">
       <button type="button" className={clsx('flex-1 text-left hover:underline', d.status === 'concluida' ? 'text-muted line-through' : 'text-ink')} onClick={() => onOpen(d.id)}>{d.title}</button>
-      <span className="text-xs text-muted">{d.ownerName.split(' ')[0]}</span><TaskStatusChip s={d.status} />
+      <span className="text-xs text-muted">{d.ownerName.split(' ')[0]}{d.boardLabel ? ` · ${d.boardLabel}` : ''}{d.dueDay ? ` · ${fmtDate(d.dueDay)}` : ''}</span>
+      {d.atRisk ? <Chip tone="red">{d.state === 'atrasada' ? 'Atrasada' : 'Em risco'}</Chip> : null}
+      <TaskStatusChip s={d.status} />
       {removable && t.can.edit && <button type="button" aria-label={`Retirar dependência de ${d.title}`} className="text-muted hover:text-danger" onClick={() => del.mutate(d.id)}><X className="h-4 w-4" /></button>}
     </li>
   );
-  const options = (found.data?.items ?? []).filter((x) => x.id !== t.id && !t.blockedBy.some((d) => d.id === x.id));
+  const options = (found.data ?? []).filter((x) => x.id !== t.id && !t.blockedBy.some((d) => d.id === x.id));
   return (
     <section>
       <h3 className="mb-2 text-base font-bold text-ink">Dependências</h3>
@@ -359,9 +371,10 @@ function Dependencies({ t, onOpen }: { t: Detail; onOpen: (id: string) => void }
       {t.can.edit && (
         <div className="mb-3 space-y-1">
           <Input aria-label="Buscar tarefa da qual esta depende" placeholder="Buscar tarefa para adicionar" value={search} onChange={(e) => setSearch(e.target.value)} />
-          {!!options.length && <ul className="max-h-40 overflow-y-auto rounded-md border border-line">{options.slice(0, 8).map((o) => <li key={o.id}><button type="button" className="block w-full px-3 py-1.5 text-left text-sm hover:bg-surface-2" onClick={() => add.mutate(o.id)}>{o.title} <span className="text-xs text-muted">· {o.ownerName}</span></button></li>)}</ul>}
+          {!!options.length && <ul className="max-h-40 overflow-y-auto rounded-md border border-line">{options.slice(0, 8).map((o) => <li key={o.id}><button type="button" className="block w-full px-3 py-1.5 text-left text-sm hover:bg-surface-2" onClick={() => add.mutate(o.id)}>{o.title} <span className="text-xs text-muted">· {o.ownerName}{o.boardLabel ? ` · ${o.boardLabel}` : ''}</span></button></li>)}</ul>}
         </div>
       )}
+      {t.blockedBy.some((d) => d.atRisk) && <p className="mb-2 text-xs text-danger">Uma predecessora está atrasada ou termina depois do prazo desta. O prazo desta não muda sozinho: combine com a liderança.</p>}
       {!!t.blocking.length && <><p className="mb-1 text-sm text-muted">Bloqueia:</p><ul className="space-y-1">{t.blocking.map((d) => row(d, false))}</ul></>}
     </section>
   );

@@ -16,7 +16,8 @@ import * as s from '../db/schema';
 import { level } from '../services/scope';
 import { assertProjectLinks, dueAtOf, loadProject, todayLocal } from '../services/projects';
 import { notifyTask, noticesOf } from '../services/contractNotify';
-import { assertBoardManagement } from './workBoards';
+import { assertBoardManagement, assertBoardOpen } from './workBoards';
+import { crossBoardTask, dependencyLinks, loadTaskOrDependencyPeer, warnDependents } from '../services/dependencies';
 import { activityScope, applyStatus, assertAssignee, assertUsersActive, blockersOf, decideApproval, loadTask, taskEvent } from '../services/tasks';
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Data inválida');
@@ -196,7 +197,8 @@ export const taskRoutes = [
     module: 'atividades',
     params: IdParams,
     handler: async ({ app, auth, params }) => {
-      const { t, can } = await loadTask(app.db, auth, params.id);
+      // tarefa de outro departamento ligada por dependência a uma tarefa sua: só leitura (os times se conversam)
+      const { t, can } = await loadTaskOrDependencyPeer(app.db, auth, params.id);
       const today = todayLocal(auth);
       const [row] = await listQuery(app.db, auth).where(eq(s.activities.id, t.id)).limit(1);
       const [subtasks, blockedBy, blocking, comments, time, files, events, users, stages, milestones] = await Promise.all([
@@ -216,7 +218,7 @@ export const taskRoutes = [
       const blockers = await blockersOf(app.db, t);
       return {
         ...dto(row!, auth, today),
-        subtasks: subtasks.map((r) => dto(r, auth, today)), blockedBy, blocking, comments, time, files, events, parent: parent ?? null,
+        subtasks: subtasks.map((r) => dto(r, auth, today)), ...(await dependencyLinks(app.db, auth, t.id)), comments, time, files, events, parent: parent ?? null,
         people: users, stages, milestones, blockers, can,
         // Quadro de Tarefas: planejamento da tarefa (departamento, 70/20/10, esforço, semana, envio entre times)
         planning: {
@@ -359,6 +361,7 @@ export const taskRoutes = [
         if (body.status === 'aguardando' && body.waitingOn !== undefined) await tx.update(s.activities).set({ waitingOn: body.waitingOn }).where(eq(s.activities.id, t.id));
         return { status: t.status, next: null };
       });
+      if (body.dueOn !== undefined) await warnDependents(app.db, auth, params.id, body.dueOn ? `teve o prazo alterado para ${body.dueOn.split('-').reverse().join('/')}` : 'ficou sem prazo').catch(() => undefined);
       if (body.ownerId) await notifyTask(app.db, app.config, params.id, 'criada', { cycle: `para:${body.ownerId}:${Date.now()}` });
       if (r.status === 'concluida' && body.status === 'concluida') await notifyTask(app.db, app.config, params.id, 'concluida');
       return { ok: true, ...r };
@@ -432,7 +435,12 @@ export const taskRoutes = [
       await app.db.transaction(async (tx) => {
         const { t, can } = await loadTask(tx, auth, params.id);
         if (!can.edit) throw forbidden();
-        const { t: other } = await loadTask(tx, auth, body.dependsOnId);
+        // a predecessora pode ser de outro departamento (aberta e num quadro ligado para quem vincula)
+        const other = await loadTask(tx, auth, body.dependsOnId).then((x) => x.t).catch(async (e) => {
+          const peer = await crossBoardTask(tx, auth, body.dependsOnId, (b) => { try { assertBoardOpen(auth, b); return true; } catch { return false; } });
+          if (!peer) throw e;
+          return peer.t;
+        });
         const edges = await tx.select({ from: s.activityDependencies.activityId, to: s.activityDependencies.dependsOnId }).from(s.activityDependencies).where(eq(s.activityDependencies.tenantId, auth.tenantId));
         if (createsCycle(edges, t.id, other.id)) throw unprocessable('Isso criaria uma dependência circular.');
         await tx.insert(s.activityDependencies).values({ tenantId: auth.tenantId, activityId: t.id, dependsOnId: other.id, createdBy: auth.userId }).onConflictDoNothing();

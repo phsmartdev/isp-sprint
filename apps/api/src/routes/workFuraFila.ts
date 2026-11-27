@@ -19,6 +19,7 @@ import * as s from '../db/schema';
 import { audit } from '../services/audit';
 import { taskEvent } from '../services/tasks';
 import { dueAtOf } from '../services/projects';
+import { warnDependents } from '../services/dependencies';
 import { ymd } from './workBoards';
 import { Board, boardOpenTasks, context, isoDay, loadSprint, peopleCapacity, sprintEvent } from './workSprints';
 
@@ -61,6 +62,10 @@ async function analysisFor(db: DbOrTx, auth: AuthContext, board: BoardKey, ctx: 
       .leftJoin(s.opportunities, eq(s.opportunities.id, s.activities.opportunityId)).leftJoin(s.contacts, eq(s.contacts.id, s.activities.contactId)).leftJoin(s.projects, eq(s.projects.id, s.activities.projectId))
       .where(and(eq(s.workSprintItems.sprintId, sprint.id), isNull(s.workSprintItems.removedAt))).orderBy(asc(s.workSprintItems.position)),
   ]);
+  // dependentes em aberto de cada tarefa (deslocá-la pode atrasar o trabalho de outros, inclusive de outros times)
+  const depCount = new Map<string, number>();
+  if (items.length) for (const d of await db.select({ id: s.activityDependencies.dependsOnId, n: sql<number>`count(*)::int` }).from(s.activityDependencies).innerJoin(s.activities, eq(s.activities.id, s.activityDependencies.activityId))
+    .where(and(inArray(s.activityDependencies.dependsOnId, items.map((x) => x.i.activityId)), isNull(s.activities.deletedAt), sql`${s.activities.status} not in ('concluida','cancelada')`)).groupBy(s.activityDependencies.dependsOnId)) depCount.set(d.id, d.n);
   const totalNet = people.reduce((t, p) => t + (p.netMinutes ?? 0), 0);
   const committed = items.reduce((t, x) => t + x.i.committedMinutes, 0);
   const free = Math.max(0, totalNet - committed);
@@ -85,7 +90,9 @@ async function analysisFor(db: DbOrTx, auth: AuthContext, board: BoardKey, ctx: 
         activityId: x.i.activityId, title: x.title, ownerName: x.ownerName, remainingMinutes: x.remaining ?? x.i.committedMinutes, dueDay: x.dueAt ? ymd(x.dueAt, auth.timezone) : null,
         link: x.oppId ? `OP-${x.oppCode} · ${x.client ?? x.oppTitle ?? ''}` : x.projectName ? `Projeto ${x.projectName}` : null, furaFila: x.i.entry === 'fura_fila',
         selected: chosen.has(x.i.activityId), blockedReason: a.blocked.find((b) => b.id === x.i.activityId)?.reason ?? null,
-        impact: cat === 'comercial' ? (x.oppId ? 'Atividade comercial: renegociar com a gerência e com o cliente' : 'Atividade comercial: renegociar com a gerência') : 'Volta para as pendentes do time, com o histórico',
+        dependents: depCount.get(x.i.activityId) ?? 0,
+        impact: (cat === 'comercial' ? (x.oppId ? 'Atividade comercial: renegociar com a gerência e com o cliente' : 'Atividade comercial: renegociar com a gerência') : 'Volta para as pendentes do time, com o histórico')
+          + (depCount.get(x.i.activityId) ? ` · ${depCount.get(x.i.activityId)} tarefa(s) dependem desta e serão avisadas` : ''),
       })),
     })),
   };
@@ -131,6 +138,8 @@ async function apply(tx: DbOrTx, auth: AuthContext, board: BoardKey, ctx: Ctx, r
     displacedOwners.push(t!.ownerId);
     await taskEvent(tx, auth, sel.activityId, 'replanejada', { sprint: sprint.weekStart, furaFila: rid, motivo: `fura-fila “${act.title}”`, novoPrazo: sel.newDueOn });
   }
+  // quem depende das tarefas deslocadas é avisado (os prazos delas não mudam sem análise)
+  for (const sel of selection) await warnDependents(tx, auth, sel.activityId, `saiu da Sprint para o fura-fila “${act.title}”${sel.newDueOn ? ` e tem novo prazo em ${sel.newDueOn.split('-').reverse().join('/')}` : ''}`);
   const [{ pos } = { pos: 0 }] = await tx.select({ pos: sql<number>`coalesce(max(position), 0)::int + 1` }).from(s.workSprintItems).where(eq(s.workSprintItems.sprintId, sprint.id));
   await tx.insert(s.workSprintItems).values({ tenantId: auth.tenantId, sprintId: sprint.id, activityId: r.activityId, entry: 'fura_fila', committedMinutes: r.estimateMinutes, category, ownerId: r.ownerId, dueAt: dueAtOf(auth, r.neededBy) as unknown as Date, position: pos, addedBy: auth.userId, requestId: rid });
   await tx.update(s.activities).set({ plannedWeek: sprint.weekStart, planOrder: pos, ownerId: r.ownerId, estimateMinutes: act.estimateMinutes ?? r.estimateMinutes, dueAt: dueAtOf(auth, r.neededBy) as unknown as Date, updatedAt: new Date(), rowVersion: sql`${s.activities.rowVersion} + 1` }).where(eq(s.activities.id, r.activityId));

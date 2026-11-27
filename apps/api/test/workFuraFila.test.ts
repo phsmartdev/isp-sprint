@@ -13,7 +13,7 @@ const st = Date.now().toString(36);
 let team = '';
 let hadRow = false;
 let sprintId = '';
-const ids: Record<string, string> = {};
+const ids = {} as { C: string; I: string; H: string };
 const week = weekStart(new Date(Date.UTC(2046, 0, 2) + (Date.now() % 4000) * 7 * 86_400_000).toISOString().slice(0, 10));
 const day = (n: number) => { const d = new Date(`${week}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
 const h = (n: number) => n * 60;
