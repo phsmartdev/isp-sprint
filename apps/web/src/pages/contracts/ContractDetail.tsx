@@ -43,13 +43,12 @@ function EditDrawer({ c, onClose }: { c: ContractDetail; onClose: () => void }) 
   const [f, setF] = useState<FormState>(() => formFrom(c, c.current));
   const [error, setError] = useState<string | null>(null);
   const save = useMutation({
-    mutationFn: () => { const p = payloadOf(f); return api<{ version: number }>(`/contracts/${c.id}`, { method: 'PUT', body: { ...p.header, version: p.version, reason: f.reason || undefined } }); },
+    mutationFn: () => { const p = payloadOf(f, { allowNoService: !c.current.serviceType }); return api<{ version: number }>(`/contracts/${c.id}`, { method: 'PUT', body: { ...p.header, version: p.version, reason: f.reason || undefined } }); },
     onSuccess: (r) => { qc.invalidateQueries({ queryKey: ['contract', c.id] }); qc.invalidateQueries({ queryKey: ['contracts'] }); toast({ tone: 'success', message: r.version !== c.currentVersion ? `Salvo como versão ${r.version}` : 'Salvo' }); onClose(); },
     onError: (e) => setError(errMsg(e)),
   });
   return (
-    <Drawer open onClose={onClose} title={`Editar contrato ${c.current.number}`} width="lg" footer={<><Button onClick={onClose}>Cancelar</Button><Button variant="primary" loading={save.isPending} onClick={() => { setError(null); save.mutate(); }}>Salvar</Button></>}>
-      {error && <p role="alert" className="mb-3 rounded-md bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
+    <Drawer open onClose={onClose} title={`Editar contrato ${c.current.number}`} width="lg" footer={<>{error && <p role="alert" className="mr-auto max-w-md text-sm font-semibold text-danger">{error}</p>}<Button onClick={onClose}>Cancelar</Button><Button variant="primary" loading={save.isPending} onClick={() => { setError(null); save.mutate(); }}>Salvar</Button></>}>
       <ContractForm value={f} contactId={c.contactId} onChange={(p) => setF((x) => ({ ...x, ...p }))} editing validated={!!c.validatedAt} />
     </Drawer>
   );

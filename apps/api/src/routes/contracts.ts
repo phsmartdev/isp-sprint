@@ -816,11 +816,26 @@ export const contractRoutes = [
     params: IdParams,
     body: UpdateBody,
     handler: async ({ app, auth, params, body, req }) => {
-      if (body.version && (body.version.items !== undefined || body.version.monthlyCents !== undefined || body.version.totalCents !== undefined)) requireAction(auth, 'editar_valores_contrato');
       const c = await loadContract(app.db, auth, params.id);
       if (!canEdit(auth, c)) throw forbidden('Você não pode editar este contrato.');
       if (c.stage === 'arquivado') throw unprocessable('Contrato arquivado não pode ser alterado.');
-      if (c.validatedAt && body.version && !body.reason) throw unprocessable('Informe o motivo da alteração (fica no histórico da versão).', [{ path: 'reason', message: 'Obrigatório' }]);
+      // a tela manda o formulário inteiro: só o que mudou de fato nos dados contratuais gera versão, pede motivo e permissão de valores
+      if (body.version) {
+        const cur = await currentVersion(app.db, c) as unknown as Record<string, unknown>;
+        // compara pelo conteúdo: ordem das chaves, campos vazios, item sem tipo (= recorrente) e relatório não exigido (= nenhum) não contam como mudança
+        const canon = (k: string, v: unknown): unknown => {
+          if (k === 'reportTerms' && v && !(v as ReportTerms).required) return null;
+          if (k === 'items' && Array.isArray(v)) return v.map((i) => canon('', { kind: 'recorrente', ...(i as object) }));
+          if (Array.isArray(v)) return v.map((x) => canon('', x));
+          if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).filter(([, x]) => x !== null && x !== undefined && x !== '').sort(([x], [y]) => x.localeCompare(y)).map(([kk, x]) => [kk, canon('', x)]));
+          return v ?? null;
+        };
+        const same = (k: string, a: unknown, b: unknown) => JSON.stringify(canon(k, a)) === JSON.stringify(canon(k, b));
+        const changed = Object.fromEntries(Object.entries(body.version).filter(([k, v]) => v !== undefined && !same(k, v, cur[k])));
+        body.version = Object.keys(changed).length ? (changed as typeof body.version) : undefined;
+      }
+      if (body.version && (body.version.items !== undefined || body.version.monthlyCents !== undefined || body.version.totalCents !== undefined)) requireAction(auth, 'editar_valores_contrato');
+      if (c.validatedAt && body.version && !body.reason) throw unprocessable(`Informe o motivo da alteração (fica no histórico da versão). Mudou: ${Object.keys(body.version).join(', ')}.`, [{ path: 'reason', message: 'Obrigatório' }]);
       await assertUsers(app.db, auth, [body.commercialOwnerId, body.operationalOwnerId, body.csmId, body.adminOwnerId]);
       const out = await app.db.transaction(async (tx) => {
         const header: Partial<ContractRow> = {};
