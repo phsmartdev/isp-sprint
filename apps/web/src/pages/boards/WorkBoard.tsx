@@ -8,30 +8,32 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { DndContext, KeyboardSensor, PointerSensor, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import clsx from 'clsx';
-import { AlarmClock, ChevronLeft, ChevronRight, KanbanSquare, Lock, Search, ShieldCheck, Briefcase } from 'lucide-react';
+import { AlarmClock, Briefcase, CalendarRange, Eye, KanbanSquare, Lock, Plus, Search, ShieldCheck, Users, Zap } from 'lucide-react';
 import {
   BOARD_COLUMNS, BOARD_COLUMN_LABELS, BOARD_KEYS, BOARD_LABELS, CAPACITY_CATEGORIES, CAPACITY_CATEGORY_LABELS, CAPACITY_CATEGORY_SHORT, COLUMN_STATUS, TASK_ORIGINS, TASK_ORIGIN_LABELS,
-  fmtMinutes, type BoardColumn, type BoardKey, type CapacityCategory, type TaskOrigin,
+  SPRINT_STATUS_LABELS, fmtMinutes, type BoardColumn, type BoardKey, type CapacityCategory, type TaskOrigin,
 } from '@isp/domain';
 import { api, qs } from '../../lib/api';
 import { fmtBRL, fmtDate } from '../../lib/format';
 import { useUrlState } from '../../lib/hooks';
 import { PageHeader } from '../../components/layout/PageHeader';
-import { Avatar, EmptyState, ErrorState, Input, LoadingRows, Select } from '../../components/ui/primitives';
+import { Avatar, Button, EmptyState, ErrorState, Input, LoadingRows, Select } from '../../components/ui/primitives';
 import { useToast } from '../../components/ui/overlay';
 import { errMsg } from '../../features/contracts/shared';
 import { TaskDrawer } from '../../features/tasks/TaskDrawer';
+import { CapacityModal, CloseModal, PlannerModal, usePlan, type Plan } from '../../features/boards/SprintPlanner';
+import { NewTaskDialog } from '../../features/tasks/shared';
 
 type Item = {
   id: string; ref: string; title: string; type: string; status: string; column: BoardColumn; rowVersion: number; ownerId: string; ownerName: string | null; priority: string;
   dueAt: string | null; dueDay: string | null; agreedDueAt: string | null; category: CapacityCategory | null; categoryAuto: boolean; estimateMinutes: number | null; remainingMinutes: number | null;
-  origin: TaskOrigin; commercial: boolean; planned: boolean; blocked: boolean; waitingOn: string | null; protectedCommitment: boolean; overdue: boolean; dueToday: boolean;
+  origin: TaskOrigin; commercial: boolean; planned: boolean; blocked: boolean; waitingOn: string | null; protectedCommitment: boolean; overdue: boolean; dueToday: boolean; observers?: number;
   link: { kind: string; label: string; to: string; valueCents?: number | null; stage?: string | null } | null; readOnly: boolean;
 };
 type Data = {
   board: { key: BoardKey; label: string; teamIds: string[]; wipLimit: number; role: 'gestao' | 'lideranca' | 'colaborador' };
   week: string; today: string; policy: Record<CapacityCategory, number> & { version: number };
-  kpis: { overdue: number; dueToday: number; dueSoon: number; blocked: number; uncategorized: number; withoutEstimate: number; commercialUnplanned: number;
+  kpis: { overdue: number; dueToday: number; dueSoon: number; blocked: number; uncategorized: number; withoutEstimate: number; commercialUnplanned: number; inExecution: { name: string; n: number }[];
     week: { plannedMinutes: number; doneMinutes: number; plannedCount: number; doneCount: number; distribution: Record<CapacityCategory, number> }; openDistribution: Record<CapacityCategory, number> };
   owners: { id: string; name: string }[]; items: Item[]; total: number;
 };
@@ -47,6 +49,8 @@ export function WorkBoardPage() {
   const key = (BOARD_KEYS as readonly string[]).includes(board) ? (board as BoardKey) : 'comercial';
   const [u, setU] = useUrlState({ view: 'todas', week: '', q: '', owner: '', origin: '', cat: '', prio: '', blocked: '' });
   const [open, setOpen] = useState<string | null>(null);
+  const [modal, setModal] = useState<'planejar' | 'encerrar' | 'capacidade' | null>(null);
+  const [creating, setCreating] = useState(false);
   const nav = useNavigate();
   const q = useQuery({
     queryKey: ['quadro', key, u],
@@ -54,80 +58,109 @@ export function WorkBoardPage() {
     placeholderData: keepPreviousData,
   });
   const d = q.data;
-  const week = d?.week ?? '';
+  const plan = usePlan(key, d?.week);
+  const p = plan.data;
+  const leads = !!d && d.board.role !== 'colaborador';
+  const st = p?.sprint?.status;
   return (
     <div className="space-y-4">
-      <PageHeader icon={<KanbanSquare className="h-9 w-9" strokeWidth={2.2} />} title={`Quadro de Tarefas · ${BOARD_LABELS[key]}`}
-        subtitle={d ? `Semana de ${fmtDate(d.week)} a ${fmtDate(addDays(d.week, 4))} · diretriz ${d.policy.comercial / 100}/${d.policy.interno / 100}/${d.policy.hipotese / 100}${d.board.role !== 'colaborador' ? ` · você ${d.board.role === 'gestao' ? 'faz a gestão' : 'lidera'} este quadro` : ''}` : 'Tudo o que o time precisa fazer, de todos os módulos.'}
-        actions={week ? (
-          <div className="flex items-center gap-1" aria-label="Semana">
-            <button type="button" aria-label="Semana anterior" className="flex h-10 w-10 items-center justify-center border border-line bg-surface hover:border-primary" onClick={() => setU({ week: addDays(week, -7) })}><ChevronLeft className="h-4 w-4" /></button>
-            <button type="button" className="h-10 border border-line bg-surface px-3 text-sm font-semibold hover:border-primary" onClick={() => setU({ week: '' })}>Semana atual</button>
-            <button type="button" aria-label="Próxima semana" className="flex h-10 w-10 items-center justify-center border border-line bg-surface hover:border-primary" onClick={() => setU({ week: addDays(week, 7) })}><ChevronRight className="h-4 w-4" /></button>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="flex items-center gap-2 text-xl font-bold text-ink"><KanbanSquare className="h-6 w-6 text-primary" aria-hidden />Quadro do {BOARD_LABELS[key]}</h1>
+          <p className="text-sm text-muted">Sprint semanal, um responsável por tarefa e observadores. No máximo {d?.board.wipLimit ?? 3} tarefas em execução por pessoa.{d && d.board.role !== 'colaborador' ? ` Você ${d.board.role === 'gestao' ? 'faz a gestão deste time' : 'lidera este time'}.` : ''}</p>
+        </div>
+        {d && (
+          <div className="flex flex-wrap items-center gap-2">
+            <Select aria-label="Sprint" className="w-80" value={d.week} onChange={(e) => setU({ week: e.target.value === d.today ? '' : e.target.value })}>
+              {(p?.weeks ?? [{ week: d.week, status: null }]).map((w) => <option key={w.week} value={w.week}>Sprint {fmtDayMonth(w.week)} a {fmtDayMonth(addDays(w.week, 4))} · {w.status ? SPRINT_STATUS_LABELS[w.status].toLowerCase() : 'não planejada'}</option>)}
+            </Select>
+            <Button icon={<Users className="h-4 w-4" />} onClick={() => setModal('capacidade')}>Capacidade</Button>
+            {leads && p && st !== 'andamento' && st !== 'encerrada' && <Button icon={<CalendarRange className="h-4 w-4" />} onClick={() => setModal('planejar')}>Planejar Sprint</Button>}
+            {leads && p && st === 'planejamento' && <Button variant="primary" onClick={() => setModal('planejar')}>Abrir Sprint</Button>}
+            {leads && p && st === 'andamento' && <Button onClick={() => setModal('planejar')}>Ver o compromisso</Button>}
+            {leads && p && st === 'andamento' && <Button onClick={() => setModal('encerrar')}>Encerrar Sprint</Button>}
+            <Button variant="primary" icon={<Plus className="h-4 w-4" />} onClick={() => setCreating(true)}>Nova tarefa</Button>
           </div>
-        ) : undefined} />
-      {q.isError ? <ErrorState error={q.error} onRetry={() => q.refetch()} /> : !d ? <LoadingRows rows={6} /> : (
+        )}
+      </div>
+      {q.isError ? <ErrorState error={q.error} onRetry={() => q.refetch()} /> : !d ? <div className="card"><LoadingRows rows={8} /></div> : (
         <>
           {d.board.teamIds.length === 0 && <p className="border-l-4 border-l-[#B45309] bg-[#FFF7E6] px-3 py-2 text-sm text-ink">Este quadro ainda não tem equipes. A gestão do departamento ou o administrador define as equipes em Configurações → Quadros de Tarefas; até lá aparecem só as tarefas enviadas para cá.</p>}
-          <Indicators d={d} onFilter={(p) => setU(p)} />
-          <div className="flex flex-wrap items-center gap-2">
-            <div role="radiogroup" aria-label="Visão" className="inline-flex flex-wrap border border-line">
-              {VIEWS.map(([k, l]) => <button key={k} type="button" role="radio" aria-checked={u.view === k} onClick={() => setU({ view: k })} className={clsx('px-3 py-1.5 text-sm font-semibold', u.view === k ? 'bg-primary text-white' : 'bg-surface text-ink hover:bg-surface-2')}>{l}</button>)}
-            </div>
-            <label className="relative ml-auto"><Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted" aria-hidden /><Input aria-label="Buscar tarefas" className="w-56 pl-8" value={u.q} onChange={(e) => setU({ q: e.target.value })} placeholder="Buscar" /></label>
-            <Select aria-label="Responsável" className="w-44" value={u.owner} onChange={(e) => setU({ owner: e.target.value })}><option value="">Todos os responsáveis</option>{d.owners.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</Select>
-            <Select aria-label="Origem" className="w-44" value={u.origin} onChange={(e) => setU({ origin: e.target.value })}><option value="">Todas as origens</option>{TASK_ORIGINS.filter((o) => o !== 'marketing').map((o) => <option key={o} value={o}>{TASK_ORIGIN_LABELS[o]}</option>)}</Select>
+          <Summary d={d} p={p} />
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="relative w-56"><Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-muted" aria-hidden /><Input aria-label="Buscar tarefas" className="pl-8" value={u.q} onChange={(e) => setU({ q: e.target.value })} placeholder="Buscar tarefa" /></div>
+            <Select aria-label="Responsável" className="w-48" value={u.view === 'minhas' ? 'eu' : u.owner} onChange={(e) => (e.target.value === 'eu' ? setU({ view: 'minhas', owner: '' }) : setU({ owner: e.target.value, view: u.view === 'minhas' ? 'todas' : u.view }))}><option value="">Todas as pessoas</option><option value="eu">Minhas e que acompanho</option>{d.owners.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</Select>
             <Select aria-label="Categoria" className="w-44" value={u.cat} onChange={(e) => setU({ cat: e.target.value })}><option value="">Todas as categorias</option>{CAPACITY_CATEGORIES.map((c) => <option key={c} value={c}>{CAPACITY_CATEGORY_LABELS[c]}</option>)}<option value="sem">Sem categoria</option></Select>
-            <Select aria-label="Prioridade" className="w-36" value={u.prio} onChange={(e) => setU({ prio: e.target.value })}><option value="">Prioridade</option><option value="alta">Alta</option><option value="media">Média</option><option value="baixa">Baixa</option></Select>
-            <label className="flex items-center gap-1.5 text-sm"><input type="checkbox" className="h-4 w-4 accent-primary" checked={!!u.blocked} onChange={(e) => setU({ blocked: e.target.checked ? '1' : '' })} />Bloqueadas</label>
+            <Select aria-label="Origem" className="w-40" value={u.origin} onChange={(e) => setU({ origin: e.target.value })}><option value="">Todas as origens</option>{TASK_ORIGINS.filter((o) => o !== 'marketing').map((o) => <option key={o} value={o}>{TASK_ORIGIN_LABELS[o]}</option>)}</Select>
+            <Select aria-label="Mostrar" className="w-48" value={u.view === 'minhas' ? 'todas' : u.view} onChange={(e) => setU({ view: e.target.value })}>
+              <option value="todas">Todas as tarefas</option><option value="semana">Só as da Sprint</option><option value="nao_planejadas">Fora da Sprint</option><option value="enviadas">Enviadas a outros times</option>
+            </Select>
+            <label className="flex h-10 items-center gap-1.5 text-sm"><input type="checkbox" className="h-4 w-4 accent-primary" checked={!!u.blocked} onChange={(e) => setU({ blocked: e.target.checked ? '1' : '' })} />Bloqueadas</label>
           </div>
           {u.view === 'enviadas'
             ? <SentList items={d.items} onOpen={setOpen} />
-            : !d.items.length ? <EmptyState title="Nenhuma tarefa aqui" description={u.view === 'semana' ? 'Nada planejado para esta semana ainda.' : 'Tarefas criadas nos módulos (CRM, Contratos, Sucesso do Cliente, Projetos) pelas pessoas das equipes deste quadro aparecem aqui sozinhas.'} />
-            : <Kanban d={d} onOpen={(i) => (i.readOnly && i.link?.to ? nav(i.link.to) : setOpen(i.id))} />}
+            : <Kanban d={d} onAdd={() => setCreating(true)} onOpen={(i) => (i.readOnly && i.link?.to ? nav(i.link.to) : setOpen(i.id))} />}
         </>
       )}
-      <TaskDrawer id={open} onClose={() => { setOpen(null); void q.refetch(); }} onOpen={setOpen} />
+      <TaskDrawer id={open} onClose={() => { setOpen(null); void q.refetch(); void plan.refetch(); }} onOpen={setOpen} />
+      <NewTaskDialog open={creating} onClose={() => setCreating(false)} onCreated={(id) => { setCreating(false); void q.refetch(); void plan.refetch(); setOpen(id); }} />
+      {modal === 'planejar' && p && <PlannerModal board={key} plan={p} onClose={() => setModal(null)} />}
+      {modal === 'encerrar' && p?.sprint && <CloseModal board={key} sprintId={p.sprint.id} onClose={() => setModal(null)} />}
+      {modal === 'capacidade' && d && <CapacityModal board={key} week={d.week} leads={leads} onClose={() => setModal(null)} />}
     </div>
   );
 }
 
-function Indicators({ d, onFilter }: { d: Data; onFilter: (p: Record<string, string>) => void }) {
-  const k = d.kpis;
-  const pct = k.week.plannedMinutes ? Math.round((k.week.doneMinutes / k.week.plannedMinutes) * 100) : null;
-  const total = CAPACITY_CATEGORIES.reduce((t, c) => t + k.week.distribution[c], 0);
-  const stat = (label: string, value: number, tone: 'danger' | 'warn' | 'soft', onClick?: () => void) => (
-    <button type="button" onClick={onClick} disabled={!onClick} className={clsx('border px-3 py-2 text-left', tone === 'danger' && value ? 'border-danger/50 bg-danger-soft' : tone === 'warn' && value ? 'border-[#B45309]/40 bg-[#FFF7E6]' : 'border-line bg-surface', onClick && 'hover:border-primary')}>
-      <span className="block text-xs font-semibold text-muted">{label}</span><span className={clsx('num text-xl font-bold', tone === 'danger' && value ? 'text-danger' : 'text-ink')}>{value}</span>
-    </button>
-  );
+const fmtDayMonth = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
+const CAT_DOT: Record<CapacityCategory, string> = { comercial: 'bg-primary', interno: 'bg-[#0F766E]', hipotese: 'bg-[#B45309]' };
+
+function Stat({ label, value, tone, icon }: { label: string; value: number; tone: 'danger' | 'warn' | 'soft' | 'ok'; icon?: React.ReactNode }) {
   return (
-    <section aria-label="Indicadores do quadro" className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_380px]">
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
-        <div className="border border-line bg-surface px-3 py-2">
-          <span className="block text-xs font-semibold text-muted">Semana</span>
-          <span className="num text-xl font-bold text-ink">{k.week.doneCount}/{k.week.plannedCount}</span>
-          <span className="block text-xs text-muted">{pct === null ? 'sem esforço planejado' : `${pct}% do esforço (${hours(k.week.doneMinutes)} de ${hours(k.week.plannedMinutes)})`}</span>
-        </div>
-        {stat('Atrasadas', k.overdue, 'danger')}
-        {stat('Vencem hoje', k.dueToday, 'warn')}
-        {stat('Próximos 3 dias', k.dueSoon, 'soft')}
-        {stat('Bloqueadas', k.blocked, 'warn', () => onFilter({ blocked: '1' }))}
-        {stat('Comerciais fora do plano', k.commercialUnplanned, 'warn', () => onFilter({ view: 'nao_planejadas', origin: 'crm' }))}
+    <div className={clsx('card p-4', tone === 'danger' && 'border-danger/50 bg-danger-soft', tone === 'warn' && 'border-[#B45309]/40 bg-[#FFF7E6]')}>
+      <p className="flex items-center gap-1.5 text-xs font-semibold text-muted">{icon}{label}</p>
+      <p className={clsx('num mt-1 text-3xl font-bold', tone === 'danger' ? 'text-danger' : tone === 'warn' ? 'text-[#92400E]' : 'text-ink')}>{value}</p>
+    </div>
+  );
+}
+
+/** Resumo em cima do quadro, no mesmo formato do Quadro do Marketing; esforço em horas estimadas, nunca contagem. */
+function Summary({ d, p }: { d: Data; p: Plan | undefined }) {
+  const k = d.kpis;
+  const w = k.week;
+  const pct = w.plannedMinutes ? Math.round((w.doneMinutes / w.plannedMinutes) * 100) : 0;
+  const total = CAPACITY_CATEGORIES.reduce((t, c) => t + w.distribution[c], 0);
+  // dias úteis da semana (seg–sex) que ainda faltam, e quanto do tempo já passou
+  const elapsed = Math.min(5, Math.max(0, Math.round((Date.parse(`${d.today}T12:00:00Z`) - Date.parse(`${d.week}T12:00:00Z`)) / 86_400_000)));
+  const st = p?.sprint?.status;
+  const statusLabel = st ? SPRINT_STATUS_LABELS[st].toLowerCase() : 'não planejada';
+  return (
+    <section aria-label="Resumo da Sprint" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[1.4fr_repeat(4,1fr)_1.6fr]">
+      <div className="card p-4">
+        <p className="text-xs font-semibold text-muted">Sprint {fmtDayMonth(d.week)} a {fmtDayMonth(addDays(d.week, 4))} · {statusLabel}</p>
+        <p className="mt-1 text-2xl font-bold text-ink"><span className="num">{w.doneCount}</span><span className="text-base font-semibold text-muted"> de {w.plannedCount} entregues</span></p>
+        <div className="mt-2 h-2 bg-line" aria-hidden><div className="h-2 bg-success" style={{ width: `${pct}%` }} /></div>
+        <p className="mt-1 text-xs text-muted">{pct}% do esforço ({hours(w.doneMinutes)} de {hours(w.plannedMinutes)}){d.today >= d.week && d.today <= addDays(d.week, 6) ? ` · ${5 - elapsed} dia(s) restante(s) · ${elapsed * 20}% do tempo` : ''}</p>
+        {p?.sprint?.objective && <p className="mt-1 line-clamp-2 text-xs text-ink">Objetivo: {p.sprint.objective}</p>}
+        {p && <p className="mt-1 text-xs text-muted">Capacidade: {hours(p.capacity.selectedMinutes)} de {hours(p.capacity.totalNetMinutes)}{p.capacity.withoutSchedule.length ? ` · sem jornada: ${p.capacity.withoutSchedule.join(', ')}` : ''}</p>}
       </div>
-      <div className="border border-line bg-surface px-3 py-2" aria-label="Distribuição 70/20/10 da semana">
-        <div className="flex items-center justify-between text-xs font-semibold text-muted"><span>Distribuição da semana (esforço estimado)</span><span>diretriz {d.policy.comercial / 100}/{d.policy.interno / 100}/{d.policy.hipotese / 100}</span></div>
-        <div className="mt-1.5 flex h-3 w-full overflow-hidden bg-surface-2">{total ? CAPACITY_CATEGORIES.map((c) => <span key={c} className={CAT_BAR[c]} style={{ width: `${(k.week.distribution[c] / total) * 100}%` }} title={`${CAPACITY_CATEGORY_LABELS[c]}: ${hours(k.week.distribution[c])}`} />) : null}</div>
-        <ul className="mt-1.5 flex flex-wrap gap-x-4 gap-y-0.5 text-xs">
-          {CAPACITY_CATEGORIES.map((c) => <li key={c}><span className={clsx('mr-1 inline-block h-2 w-2', CAT_BAR[c])} />{CAPACITY_CATEGORY_LABELS[c]}: <b className="num">{total ? Math.round((k.week.distribution[c] / total) * 100) : 0}%</b> <span className="text-muted">(meta {d.policy[c] / 100}%)</span></li>)}
-        </ul>
-        {(k.uncategorized > 0 || k.withoutEstimate > 0) && <p className="mt-1 text-xs text-[#92400E]">{[k.uncategorized ? `${k.uncategorized} sem categoria` : '', k.withoutEstimate ? `${k.withoutEstimate} sem estimativa de esforço` : ''].filter(Boolean).join(' · ')}: classifique antes de planejar a semana.</p>}
+      <Stat label="Atrasadas" value={k.overdue} tone={k.overdue ? 'danger' : 'ok'} icon={<AlarmClock className="h-4 w-4" />} />
+      <Stat label="Vencem hoje" value={k.dueToday} tone={k.dueToday ? 'warn' : 'ok'} />
+      <Stat label="Vencem em 2 dias" value={k.dueSoon} tone={k.dueSoon ? 'soft' : 'ok'} />
+      <Stat label="Fura-filas" value={p?.furaFilas ?? 0} tone={p?.furaFilas ? 'soft' : 'ok'} icon={<Zap className="h-4 w-4" />} />
+      <div className="card p-4" aria-label="Esforço da Sprint">
+        <p className="text-xs font-semibold text-muted">Esforço da Sprint (meta {d.policy.comercial / 100} · {d.policy.interno / 100} · {d.policy.hipotese / 100})</p>
+        <div className="mt-2 flex h-3 w-full overflow-hidden bg-line" aria-hidden>{total ? CAPACITY_CATEGORIES.map((c) => <div key={c} className={CAT_DOT[c]} style={{ width: `${(w.distribution[c] / total) * 100}%` }} />) : null}</div>
+        <ul className="mt-1.5 space-y-0.5 text-xs">{CAPACITY_CATEGORIES.map((c) => { const v = total ? Math.round((w.distribution[c] / total) * 100) : 0; const t = d.policy[c] / 100; return (
+          <li key={c} className="flex justify-between gap-2"><span className="flex items-center gap-1.5"><span className={clsx('h-2 w-2', CAT_DOT[c])} />{CAPACITY_CATEGORY_LABELS[c]}</span><span className={clsx('num', Math.abs(v - t) > 10 && w.distribution[c] > 0 ? 'font-semibold text-[#B45309]' : 'text-muted')}>{v}% / {t}%</span></li>
+        ); })}</ul>
+        <p className="mt-1.5 text-xs text-muted">Em execução: {k.inExecution.length ? k.inExecution.map((x) => `${x.name.split(' ')[0]} ${x.n}`).join(' · ') : 'ninguém'}</p>
+        {(k.uncategorized > 0 || k.withoutEstimate > 0) && <p className="mt-1 text-xs text-[#92400E]">{[k.uncategorized ? `${k.uncategorized} sem categoria` : '', k.withoutEstimate ? `${k.withoutEstimate} sem esforço` : ''].filter(Boolean).join(' · ')}</p>}
       </div>
     </section>
   );
 }
 
-function Kanban({ d, onOpen }: { d: Data; onOpen: (i: Item) => void }) {
+function Kanban({ d, onOpen, onAdd }: { d: Data; onOpen: (i: Item) => void; onAdd: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }), useSensor(KeyboardSensor));
@@ -152,8 +185,9 @@ function Kanban({ d, onOpen }: { d: Data; onOpen: (i: Item) => void }) {
     <DndContext sensors={sensors} onDragEnd={end}>
       <div className="scroll-thin flex gap-3 overflow-x-auto pb-2">
         {BOARD_COLUMNS.map((c) => (
-          <Column key={c} col={c} count={by[c].length}>
+          <Column key={c} col={c} count={by[c].length} onAdd={c === 'backlog' ? onAdd : undefined}>
             {by[c].map((i) => <CardView key={i.id} i={i} onOpen={() => onOpen(i)} />)}
+            {!by[c].length && <p className="px-1 py-4 text-center text-xs text-muted">{c === 'backlog' ? 'Nada pendente fora da Sprint' : c === 'a_fazer' ? 'Entra pelo Planejar Sprint' : 'Arraste tarefas para cá'}</p>}
           </Column>
         ))}
       </div>
@@ -161,11 +195,14 @@ function Kanban({ d, onOpen }: { d: Data; onOpen: (i: Item) => void }) {
   );
 }
 
-function Column({ col, count, children }: { col: BoardColumn; count: number; children: React.ReactNode }) {
+function Column({ col, count, onAdd, children }: { col: BoardColumn; count: number; onAdd?: () => void; children: React.ReactNode }) {
   const { setNodeRef, isOver } = useDroppable({ id: col });
   return (
     <section ref={setNodeRef} aria-label={BOARD_COLUMN_LABELS[col]} className={clsx('flex w-72 shrink-0 flex-col border border-line bg-surface-2/60', isOver && 'ring-2 ring-primary/40')}>
-      <header className="border-b border-line bg-surface px-3 py-2"><h2 className="text-sm font-bold text-ink">{BOARD_COLUMN_LABELS[col]} <span className="num font-normal text-muted">{count}</span></h2></header>
+      <header className="flex items-center justify-between border-b border-line bg-surface px-3 py-2">
+        <h2 className="text-sm font-bold text-ink">{BOARD_COLUMN_LABELS[col]} <span className="num font-normal text-muted">{count}</span></h2>
+        {onAdd && <button type="button" aria-label={`Nova tarefa em ${BOARD_COLUMN_LABELS[col]}`} className="text-muted hover:text-primary" onClick={onAdd}><Plus className="h-4 w-4" /></button>}
+      </header>
       <div className="flex min-h-[120px] flex-1 flex-col gap-2 p-2">{children}</div>
     </section>
   );
@@ -191,8 +228,11 @@ function CardView({ i, onOpen }: { i: Item; onOpen: () => void }) {
         <span className="num font-semibold">{i.ref}</span>
         <span className="min-w-0 truncate">{TASK_ORIGIN_LABELS[i.origin]}</span>
         {i.estimateMinutes ? <span className="num">{fmtMinutes(i.remainingMinutes ?? i.estimateMinutes)}</span> : null}
-        {i.dueDay && <span className={clsx('inline-flex items-center gap-0.5 px-1 font-semibold', i.overdue ? 'bg-danger-soft text-danger' : i.dueToday ? 'bg-[#FFF7E6] text-[#92400E]' : '')}><AlarmClock className="h-3 w-3" aria-hidden />{fmtDate(i.dueDay)}</span>}
-        <span className="ml-auto shrink-0"><Avatar name={i.ownerName ?? '?'} userId={i.ownerId} size={22} /></span>
+        <span className={clsx('px-1.5 py-0.5 font-semibold', i.overdue ? 'bg-danger-soft text-danger' : i.dueToday ? 'bg-[#FFF7E6] text-[#92400E]' : 'bg-surface-2')}>{i.dueDay ? (i.overdue ? `Atrasada · ${fmtDate(i.dueDay)}` : i.dueToday ? 'Vence hoje' : fmtDate(i.dueDay)) : 'Sem prazo'}</span>
+        <span className="ml-auto flex shrink-0 items-center gap-1.5">
+          {i.observers ? <span className="flex items-center gap-0.5" title="Observadores"><Eye className="h-3.5 w-3.5" aria-hidden />{i.observers}</span> : null}
+          <Avatar name={i.ownerName ?? '?'} userId={i.ownerId} size={22} />
+        </span>
       </div>
     </article>
   );
