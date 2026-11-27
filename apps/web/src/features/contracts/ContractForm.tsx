@@ -54,7 +54,8 @@ const itemsOf = (rows: ItemRow[]): ContractItem[] => rows.filter((r) => r.descri
 export const autoValues = (f: Pick<FormState, 'items' | 'termMonths'>) => contractValuesFromItems(itemsOf(f.items), f.termMonths ? Number(f.termMonths) : null);
 
 /** Monta o corpo para a API. Erros de digitação de valores voltam como mensagem. */
-export function payloadOf(f: FormState) {
+/** `allowNoService`: contratos antigos, cadastrados antes do campo existir, salvam sem escolher o serviço. */
+export function payloadOf(f: FormState, opts: { allowNoService?: boolean } = {}) {
   const items = itemsOf(f.items);
   const auto = autoValues(f);
   const monthlyCents = !f.monthlyAuto && f.monthly.trim() ? toCents(f.monthly) : f.billingType === 'medicao' && !auto.monthlyCents ? 0 : auto.monthlyCents;
@@ -69,7 +70,7 @@ export function payloadOf(f: FormState) {
     : { required: false, sector: null, validatorId: null, dueDay: null, alertDaysBefore: null };
   const dErr = deliveryErrors(f.delivery);
   if (dErr.length) throw new Error(`Endereços de entrega: ${dErr.slice(0, 3).join(' ')}`);
-  if (!f.serviceType) throw new Error('Escolha o serviço do contrato.');
+  if (!f.serviceType && !opts.allowNoService) throw new Error('Escolha o serviço do contrato.');
   const zErr = needsZenith(f.serviceType) ? zenithErrors(f.zenith) : [];
   if (zErr.length) throw new Error(`Cadastro Zenith: falta ${zErr.map((e) => e.message.toLowerCase()).join(', ')}.`);
   const initialBalanceCents = f.initialBalance.trim() ? toCents(f.initialBalance) : 0;
@@ -81,7 +82,7 @@ export function payloadOf(f: FormState) {
       number: f.number.trim(), object: f.object.trim(), signedAt: nul(f.signedAt), startAt: nul(f.startAt), endAt: nul(f.endAt), termMonths: f.termMonths ? Number(f.termMonths) : null,
       activationAt: nul(f.activationAt), billingStartAt: nul(f.billingStartAt), renewalAt: nul(f.renewalAt), monthlyCents, totalCents, billingDay: f.billingDay ? Number(f.billingDay) : null, billingTerms: nul(f.billingTerms),
       items, guarantee, publicTerms, reportTerms, adjustmentIndex: nul(f.adjustmentIndex), adjustmentBaseDate: nul(f.adjustmentBaseDate), adjustmentRule: nul(f.adjustmentRule), specialConditions: nul(f.specialConditions),
-      serviceType: f.serviceType, zenith: needsZenith(f.serviceType) ? normalizeZenith(f.zenith) : null,
+      serviceType: f.serviceType || null, zenith: needsZenith(f.serviceType) ? normalizeZenith(f.zenith) : null,
       deliveryAddresses: { columns: f.delivery.columns.map((c) => c.trim()), rows: f.delivery.rows.map((r) => ({ ...r, address: r.address.trim(), service: r.service?.trim() || null })) },
     },
   };

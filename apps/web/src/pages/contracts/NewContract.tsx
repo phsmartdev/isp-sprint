@@ -45,7 +45,6 @@ export function NewContractPage() {
       <Breadcrumb items={[{ label: 'Gestão de Contratos', to: '/contracts' }, { label: 'Novo contrato' }]} />
       <h1 className="mb-1 text-2xl font-extrabold tracking-tight text-ink">Novo contrato</h1>
       <p className="mb-4 text-md text-muted">O cliente vem do cadastro do CRM. Depois de salvar, valide o cadastro para iniciar ERP, provisionamento e implantação.</p>
-      {error && <p role="alert" className="mb-4 rounded-md bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
       {p && (
         <div className="mb-4 space-y-2">
           <div className="card flex flex-wrap items-center justify-between gap-3 p-4">
@@ -83,7 +82,8 @@ export function NewContractPage() {
         </section>
       )}
       <ContractForm value={f} contactId={p?.opportunity.contactId ?? contact?.id ?? null} onChange={(x) => setF((cur) => ({ ...cur, ...x }))} />
-      <div className="sticky bottom-0 mt-4 flex justify-end gap-2 border-t border-line bg-bg/95 py-3 backdrop-blur">
+      <div className="sticky bottom-0 mt-4 flex items-center justify-end gap-2 border-t border-line bg-bg/95 py-3 backdrop-blur">
+        {error && <p role="alert" className="mr-auto max-w-xl text-sm font-semibold text-danger">{error}</p>}
         <Button onClick={() => nav(-1)}>Cancelar</Button>
         <Button variant="primary" size="lg" icon={<FileSignature className="h-5 w-5" />} loading={create.isPending} disabled={(!oppId && !contact) || !!p?.existingContractId || (p && !p.won) || !f.number.trim() || !f.object.trim() || !f.commercialOwnerId} onClick={() => { setError(null); create.mutate(); }}>Cadastrar contrato</Button>
       </div>
