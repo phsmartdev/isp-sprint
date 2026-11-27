@@ -25,6 +25,8 @@ const SettingsBody = z.object({
     businessStart: z.number().int().min(0).max(23), businessEnd: z.number().int().min(1).max(24), businessDays: z.array(z.number().int().min(0).max(6)).min(1).max(7),
     warnHours: z.array(z.number().min(0.25).max(168)).max(4), unassignedMinutes: z.number().int().min(5).max(10_080), repeatLateHours: z.number().min(0.5).max(72),
     escalateAfterHours: z.number().min(0).max(720), digestHour: z.number().int().min(0).max(23), email: z.boolean(), whatsapp: z.boolean(),
+    // gamificação: prazo para responder menção e aprovação (vazio = o prazo para assumir)
+    mentionReplyHours: z.number().min(0.25).max(720).nullable().optional(), approvalReplyHours: z.number().min(0.25).max(720).nullable().optional(),
   }),
 });
 

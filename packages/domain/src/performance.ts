@@ -8,10 +8,10 @@ import { DEFAULT_INTERVENTION_CONFIG, validateInterventionConfig, type Intervent
  * calculados por regras versionadas, sem dupla contagem (créditos diretos somam 100%).
  */
 
-export const EVENT_MODULES = ['comercial', 'contratos', 'atas', 'projetos', 'tarefas', 'aprovacoes', 'sucesso_cliente', 'abm', 'email'] as const;
+export const EVENT_MODULES = ['comercial', 'contratos', 'atas', 'projetos', 'tarefas', 'aprovacoes', 'sucesso_cliente', 'abm', 'email', 'glpi'] as const;
 export type EventModule = (typeof EVENT_MODULES)[number];
 export const EVENT_MODULE_LABELS: Record<EventModule, string> = {
-  comercial: 'Comercial', contratos: 'Contratos', atas: 'Atas', projetos: 'Projetos', tarefas: 'Tarefas', aprovacoes: 'Aprovações', sucesso_cliente: 'Sucesso do Cliente', abm: 'ABM', email: 'E-mail',
+  comercial: 'Comercial', contratos: 'Contratos', atas: 'Atas', projetos: 'Projetos', tarefas: 'Tarefas', aprovacoes: 'Aprovações', sucesso_cliente: 'Sucesso do Cliente', abm: 'ABM', email: 'E-mail', glpi: 'GLPI',
 };
 
 export type EventTypeDef = {
@@ -54,6 +54,11 @@ export const BUSINESS_EVENT_TYPES = [
   { key: 'abm_play_concluido', label: 'Play do ABM encerrado', module: 'abm', source: 'Execução de play encerrada com resultado (resultado = sucesso ou sem_sucesso)', owner: 'Quem conduziu o play' },
   { key: 'abm_sinal_tratado', label: 'Sinal do ABM tratado', module: 'abm', source: 'Sinal marcado como tratado (horas até tratar; tipo = tipo do sinal; severidade)', owner: 'Quem tratou' },
   { key: 'abm_oportunidade_gerada', label: 'Oportunidade gerada em conta do ABM', module: 'abm', value: 'mensal_cents', source: 'Oportunidade criada numa conta que já estava no ABM', owner: 'Responsável pela oportunidade' },
+  // GLPI (Dados Planejados): só dentro do prazo — fora do prazo não gera evento, logo não pontua
+  { key: 'glpi_chamado_assumido', label: 'Chamado do GLPI assumido no prazo', module: 'glpi', source: 'Chamado atribuído dentro do prazo para assumir (SLA do GLPI ou o da configuração)', owner: 'Pessoas atribuídas ao chamado' },
+  { key: 'glpi_chamado_solucionado', label: 'Chamado do GLPI solucionado no prazo', module: 'glpi', source: 'Chamado solucionado ou fechado dentro do prazo para solucionar', owner: 'Pessoas atribuídas ao chamado' },
+  { key: 'glpi_mencao_respondida', label: 'Menção no GLPI respondida no prazo', module: 'glpi', source: 'Resposta da pessoa mencionada dentro do prazo de resposta a menção', owner: 'Pessoa mencionada' },
+  { key: 'glpi_aprovacao_respondida', label: 'Aprovação no GLPI respondida no prazo', module: 'glpi', source: 'Pedido de aprovação aprovado ou recusado dentro do prazo de resposta', owner: 'Quem foi chamado a aprovar' },
 ] as const satisfies readonly EventTypeDef[];
 export type BusinessEventType = (typeof BUSINESS_EVENT_TYPES)[number]['key'];
 export const EVENT_TYPE_KEYS = BUSINESS_EVENT_TYPES.map((t) => t.key) as BusinessEventType[];

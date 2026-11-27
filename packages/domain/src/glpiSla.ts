@@ -30,6 +30,12 @@ export type SlaSettings = {
   ownHours: number;
   /** contar só as horas do horário comercial (horas úteis) */
   businessHoursOnly: boolean;
+  /**
+   * Gamificação: prazo (horas, mesma contagem acima) para responder uma menção e para responder um pedido de aprovação.
+   * Vazio = usa o prazo para assumir. Fora do prazo não pontua.
+   */
+  mentionReplyHours?: number | null;
+  approvalReplyHours?: number | null;
 };
 
 export const DEFAULT_SLA_SETTINGS: SlaSettings = {
@@ -172,4 +178,48 @@ export function slaDueAlerts(t: SlaTicket, now: Date, s: SlaSettings, tz: string
 export function openedBucket(openedAt: Date, tz: string) {
   const p = localParts(openedAt, tz);
   return { weekday: p.weekday, hour: p.hour, date: p.date };
+}
+
+
+// ------------------------------------------------------------------ gamificação: ações no GLPI que pontuam
+
+export type GlpiScoreType = 'glpi_chamado_assumido' | 'glpi_chamado_solucionado' | 'glpi_mencao_respondida' | 'glpi_aprovacao_respondida';
+export type GlpiScoreTicket = Pick<SlaTicket, 'dueSolveAt' | 'dueOwnAt' | 'openedAt' | 'takenAt' | 'solvedAt'> & {
+  closedAt?: Date | null;
+  /** pessoas do RevOps atribuídas ao chamado */
+  userIds: string[];
+  mentions: { userId: string; at: string | null; answeredAt: string | null }[];
+  approvals: { validationId: number; userId: string | null; at: string | null; status: number; decidedAt: string | null }[];
+};
+export type GlpiScoreEvent = { type: GlpiScoreType; userId: string; at: Date; due: Date; key: string };
+
+/**
+ * Ações no GLPI que pontuam, uma por pessoa e ação (a chave evita repetir). Só pontua o que foi feito dentro do prazo:
+ * assumir (prazo para assumir), solucionar/encerrar (prazo para solucionar), responder menção e responder aprovação
+ * (prazos próprios; vazios = prazo para assumir). Sem prazo calculável, não pontua.
+ */
+export function glpiScoreEvents(glpiId: number, t: GlpiScoreTicket, s: SlaSettings, tz = 'America/Sao_Paulo'): GlpiScoreEvent[] {
+  const out: GlpiScoreEvent[] = [];
+  const people = [...new Set(t.userIds)];
+  const ownDue = ticketOwnDue(t, s, tz);
+  if (t.takenAt && ownDue && t.takenAt.getTime() <= ownDue.getTime())
+    for (const u of people) out.push({ type: 'glpi_chamado_assumido', userId: u, at: t.takenAt, due: ownDue, key: `glpi_chamado_assumido:${glpiId}:${u}` });
+  const solved = t.solvedAt ?? t.closedAt ?? null;
+  const solveDue = ticketDue(t, s, tz);
+  if (solved && solveDue && solved.getTime() <= solveDue.getTime())
+    for (const u of people) out.push({ type: 'glpi_chamado_solucionado', userId: u, at: solved, due: solveDue, key: `glpi_chamado_solucionado:${glpiId}:${u}` });
+  const replyHours = (h: number | null | undefined) => (h && h > 0 ? h : s.ownHours);
+  for (const m of t.mentions) {
+    if (!m.at || !m.answeredAt) continue;
+    const due = addSlaHours(new Date(m.at), replyHours(s.mentionReplyHours), tz, s);
+    const at = new Date(m.answeredAt);
+    if (at.getTime() <= due.getTime()) out.push({ type: 'glpi_mencao_respondida', userId: m.userId, at, due, key: `glpi_mencao_respondida:${glpiId}:${m.userId}:${m.at}` });
+  }
+  for (const a of t.approvals) {
+    if (!a.userId || !a.at || !a.decidedAt || (a.status !== 3 && a.status !== 4)) continue;
+    const due = addSlaHours(new Date(a.at), replyHours(s.approvalReplyHours), tz, s);
+    const at = new Date(a.decidedAt);
+    if (at.getTime() <= due.getTime()) out.push({ type: 'glpi_aprovacao_respondida', userId: a.userId, at, due, key: `glpi_aprovacao_respondida:${glpiId}:${a.validationId}` });
+  }
+  return out;
 }
