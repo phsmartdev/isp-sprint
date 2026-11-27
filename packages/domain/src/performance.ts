@@ -59,6 +59,8 @@ export const BUSINESS_EVENT_TYPES = [
   { key: 'glpi_chamado_solucionado', label: 'Chamado do GLPI solucionado no prazo', module: 'glpi', source: 'Chamado solucionado ou fechado dentro do prazo para solucionar', owner: 'Pessoas atribuídas ao chamado' },
   { key: 'glpi_mencao_respondida', label: 'Menção no GLPI respondida no prazo', module: 'glpi', source: 'Resposta da pessoa mencionada dentro do prazo de resposta a menção', owner: 'Pessoa mencionada' },
   { key: 'glpi_aprovacao_respondida', label: 'Aprovação no GLPI respondida no prazo', module: 'glpi', source: 'Pedido de aprovação aprovado ou recusado dentro do prazo de resposta', owner: 'Quem foi chamado a aprovar' },
+  // Quadro de Tarefas: tarefa comprometida na Sprint semanal e concluída até o prazo dela; fora do prazo não gera evento
+  { key: 'sprint_tarefa_no_prazo', label: 'Tarefa da Sprint concluída no prazo', module: 'tarefas', source: 'Tarefa da Sprint (plano ou fura-fila, não retirada) concluída até o prazo comprometido', owner: 'Responsável da tarefa na Sprint' },
 ] as const satisfies readonly EventTypeDef[];
 export type BusinessEventType = (typeof BUSINESS_EVENT_TYPES)[number]['key'];
 export const EVENT_TYPE_KEYS = BUSINESS_EVENT_TYPES.map((t) => t.key) as BusinessEventType[];

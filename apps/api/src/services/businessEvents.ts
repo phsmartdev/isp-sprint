@@ -175,6 +175,7 @@ async function candidates(db: DbOrTx, t: string): Promise<Candidate[]> {
            jsonb_build_object('dueOn', p.due_on, 'onTime', p.due_on is null or p.completed_at::date <= p.due_on) as context
       from projects p where p.tenant_id = ${t} and p.deleted_at is null and p.status = 'concluido' and p.completed_at is not null and ${notExists(pjKey)}`);
   out.push(...(await glpiCandidates(db, t)));
+  out.push(...(await sprintCandidates(db, t)));
   return out;
 }
 
@@ -200,6 +201,29 @@ async function glpiCandidates(db: DbOrTx, t: string): Promise<Candidate[]> {
   return out;
 }
 
+/**
+ * Quadro de Tarefas: tarefa comprometida na Sprint (plano original ou fura-fila, sem ter sido retirada) concluída até o
+ * dia do prazo comprometido, no fuso da empresa. Fora do prazo não gera evento, logo não pontua.
+ */
+async function sprintCandidates(db: DbOrTx, t: string): Promise<Candidate[]> {
+  const found = await rows<{ sprint_id: string; activity_id: string; owner_id: string; completed_at: Date; due_at: Date; title: string; board_key: string; week_start: string; entry: string }>(db, sql`
+    select i.sprint_id, i.activity_id, i.owner_id, a.completed_at, coalesce(i.due_at, a.due_at) as due_at, a.title, sp.board_key, sp.week_start::text as week_start, i.entry
+      from work_sprint_items i
+      join work_sprints sp on sp.id = i.sprint_id
+      join activities a on a.id = i.activity_id
+      join tenants tn on tn.id = i.tenant_id
+     where i.tenant_id = ${t} and i.removed_at is null and sp.status in ('andamento','encerrada')
+       and a.deleted_at is null and a.status = 'concluida' and a.completed_at is not null and coalesce(i.due_at, a.due_at) is not null
+       and a.completed_at > now() - interval '120 days'
+       and (a.completed_at at time zone tn.timezone)::date <= (coalesce(i.due_at, a.due_at) at time zone tn.timezone)::date
+       and not exists (select 1 from business_events be where be.tenant_id = ${t} and be.idem_key = 'sprint_tarefa_no_prazo:' || i.sprint_id || ':' || i.activity_id)`);
+  return found.map((r) => ({
+    key: `sprint_tarefa_no_prazo:${r.sprint_id}:${r.activity_id}`, type: 'sprint_tarefa_no_prazo' as BusinessEventType, sourceType: 'activity', sourceId: r.activity_id, ownerId: r.owner_id, participants: [],
+    occurredAt: new Date(r.completed_at), valueCents: null, quantity: null, outcome: null,
+    context: { title: r.title, board: r.board_key, sprintWeek: r.week_start, entry: r.entry, due: new Date(r.due_at).toISOString(), onTime: true },
+  }));
+}
+
 /** Eventos válidos cuja origem foi desfeita: invalida com motivo (o histórico fica). */
 async function staleEvents(db: DbOrTx, t: string) {
   return rows<{ id: string; reason: string }>(db, sql`
@@ -213,6 +237,7 @@ async function staleEvents(db: DbOrTx, t: string) {
         when 'abm_oportunidade_gerada' then 'Oportunidade removida'
         when 'marco_concluido' then 'Marco reaberto ou removido'
         when 'projeto_concluido' then 'Projeto reaberto ou removido'
+        when 'sprint_tarefa_no_prazo' then 'Tarefa reaberta, removida ou retirada da Sprint'
         else 'Origem desfeita' end as reason
       from business_events be
      where be.tenant_id = ${t} and be.validation <> 'invalidado' and (
@@ -223,6 +248,7 @@ async function staleEvents(db: DbOrTx, t: string) {
     or (be.type in ('tarefa_concluida', 'acompanhamento_registrado') and not exists (select 1 from activities a where a.id = be.source_id and a.deleted_at is null and a.completed_at is not null and be.idem_key like '%:' || (extract(epoch from a.completed_at) * 1000)::bigint))
     or (be.type = 'entrega_validada' and not exists (select 1 from activities a where a.id = be.source_id and a.deleted_at is null and a.completed_at is not null and a.approved_at is not null and be.idem_key like '%:' || (extract(epoch from a.approved_at) * 1000)::bigint))
     or (be.type = 'marco_concluido' and not exists (select 1 from project_milestones m where m.id = be.source_id and m.deleted_at is null and m.completed_at is not null and be.idem_key like '%:' || (extract(epoch from m.completed_at) * 1000)::bigint))
+    or (be.type = 'sprint_tarefa_no_prazo' and not exists (select 1 from work_sprint_items i join activities a on a.id = i.activity_id where i.activity_id = be.source_id and i.removed_at is null and be.idem_key = 'sprint_tarefa_no_prazo:' || i.sprint_id || ':' || i.activity_id and a.deleted_at is null and a.status = 'concluida'))
     or (be.type = 'projeto_concluido' and not exists (select 1 from projects p where p.id = be.source_id and p.deleted_at is null and p.status = 'concluido' and be.idem_key like '%:' || (extract(epoch from p.completed_at) * 1000)::bigint))
      )`);
 }

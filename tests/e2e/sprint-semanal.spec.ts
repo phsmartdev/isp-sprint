@@ -73,4 +73,25 @@ test('liderança planeja a semana, abre a Sprint e encerra com o comparativo', a
   await page.screenshot({ path: 'test-results/sprint-resultado.png' });
   await res.getByRole('button', { name: 'Fechar' }).first().click();
   await expect(resumo).toContainText('encerrada');
+
+  // indicadores do departamento, no próprio quadro
+  await page.getByRole('button', { name: 'Indicadores' }).click();
+  const ind = page.getByRole('dialog', { name: 'Indicadores do departamento' });
+  await ind.getByLabel('Semanas a partir de').fill(week);
+  await ind.getByLabel('Até a semana de').fill(week);
+  await expect(ind.getByRole('region', { name: 'Cumprimento do planejamento' })).toContainText('Cumprimento do plano original');
+  await expect(ind.getByRole('region', { name: 'Cumprimento do planejamento' })).toContainText('0%');
+  await expect(ind).toContainText('não são horas trabalhadas');
+  await expect(ind.getByRole('region', { name: 'Evolução das Sprints' })).toContainText('3h');
+  await page.screenshot({ path: 'test-results/indicadores.png' });
+  await ind.getByRole('button', { name: 'Fechar' }).last().click();
+
+  // visão consolidada: a liderança não tem; a gerência geral tem
+  expect((await page.request.get('/api/v1/quadros/visao-geral')).status()).toBe(403);
+  await login(page, 'carlos@yepnet.test');
+  await page.goto('/quadro/gestao');
+  await expect(page.getByRole('heading', { name: 'Visão da gerência' })).toBeVisible();
+  await expect(page.getByRole('article', { name: 'Departamento Comercial e Contratos' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Compromissos de negócio afetados' })).toContainText('cada oportunidade conta uma vez');
+  await page.screenshot({ path: 'test-results/visao-gerencia.png', fullPage: true });
 });

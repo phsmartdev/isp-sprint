@@ -8,7 +8,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { DndContext, KeyboardSensor, PointerSensor, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import clsx from 'clsx';
-import { AlarmClock, Briefcase, CalendarRange, Eye, KanbanSquare, Link2, Lock, Plus, Search, ShieldCheck, Users, Zap } from 'lucide-react';
+import { AlarmClock, BarChart3, Briefcase, Building2, CalendarRange, Eye, KanbanSquare, Link2, Lock, Plus, Search, ShieldCheck, Users, Zap } from 'lucide-react';
 import {
   BOARD_COLUMNS, BOARD_COLUMN_LABELS, BOARD_KEYS, BOARD_LABELS, CAPACITY_CATEGORIES, CAPACITY_CATEGORY_LABELS, CAPACITY_CATEGORY_SHORT, COLUMN_STATUS, TASK_ORIGINS, TASK_ORIGIN_LABELS,
   SPRINT_STATUS_LABELS, fmtMinutes, type BoardColumn, type BoardKey, type CapacityCategory, type TaskOrigin,
@@ -24,6 +24,7 @@ import { TaskDrawer } from '../../features/tasks/TaskDrawer';
 import { CapacityModal, CloseModal, PlannerModal, usePlan, type Plan } from '../../features/boards/SprintPlanner';
 import { NewTaskDialog } from '../../features/tasks/shared';
 import { FuraFilaAnalysisModal, FuraFilaListModal } from '../../features/boards/FuraFila';
+import { IndicatorsModal } from '../../features/boards/Indicators';
 import { useAuth } from '../../auth/AuthProvider';
 
 type Item = {
@@ -52,7 +53,7 @@ export function WorkBoardPage() {
   const [u, setU] = useUrlState({ view: 'todas', week: '', q: '', owner: '', origin: '', cat: '', prio: '', blocked: '', furafila: '' });
   const { me } = useAuth();
   const [open, setOpen] = useState<string | null>(null);
-  const [modal, setModal] = useState<'planejar' | 'encerrar' | 'capacidade' | 'furafilas' | null>(null);
+  const [modal, setModal] = useState<'planejar' | 'encerrar' | 'capacidade' | 'furafilas' | 'indicadores' | null>(null);
   const [creating, setCreating] = useState(false);
   const nav = useNavigate();
   const q = useQuery({
@@ -78,6 +79,8 @@ export function WorkBoardPage() {
               {(p?.weeks ?? [{ week: d.week, status: null }]).map((w) => <option key={w.week} value={w.week}>Sprint {fmtDayMonth(w.week)} a {fmtDayMonth(addDays(w.week, 4))} · {w.status ? SPRINT_STATUS_LABELS[w.status].toLowerCase() : 'não planejada'}</option>)}
             </Select>
             <Button icon={<Users className="h-4 w-4" />} onClick={() => setModal('capacidade')}>Capacidade</Button>
+            <Button icon={<BarChart3 className="h-4 w-4" />} onClick={() => setModal('indicadores')}>Indicadores</Button>
+            {d.board.role === 'gestao' && <Button icon={<Building2 className="h-4 w-4" />} onClick={() => nav('/quadro/gestao')}>Visão da gerência</Button>}
             {leads && p && st !== 'andamento' && st !== 'encerrada' && <Button icon={<CalendarRange className="h-4 w-4" />} onClick={() => setModal('planejar')}>Planejar Sprint</Button>}
             {leads && p && st === 'planejamento' && <Button variant="primary" onClick={() => setModal('planejar')}>Abrir Sprint</Button>}
             {leads && p && st === 'andamento' && <Button onClick={() => setModal('planejar')}>Ver o compromisso</Button>}
@@ -110,6 +113,7 @@ export function WorkBoardPage() {
       <NewTaskDialog open={creating} onClose={() => setCreating(false)} onCreated={(id) => { setCreating(false); void q.refetch(); void plan.refetch(); setOpen(id); }} />
       {modal === 'planejar' && p && <PlannerModal board={key} plan={p} onClose={() => setModal(null)} />}
       {modal === 'encerrar' && p?.sprint && <CloseModal board={key} sprintId={p.sprint.id} onClose={() => setModal(null)} />}
+      {modal === 'indicadores' && d && <IndicatorsModal board={key} week={d.week} people={d.owners} onClose={() => setModal(null)} />}
       {modal === 'capacidade' && d && <CapacityModal board={key} week={d.week} leads={leads} onClose={() => setModal(null)} />}
       {modal === 'furafilas' && p?.sprint && <FuraFilaListModal board={key} plan={p} onClose={() => setModal(null)} onOpen={(id) => { setModal(null); setU({ furafila: id }); }} />}
       {u.furafila && me && <FuraFilaAnalysisModal board={key} rid={u.furafila} meId={me.user.id} onClose={() => { setU({ furafila: '' }); void plan.refetch(); void q.refetch(); }} />}
