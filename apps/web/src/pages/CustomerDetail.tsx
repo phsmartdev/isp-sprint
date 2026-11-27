@@ -23,6 +23,7 @@ import { ActivityRow } from '../features/ActivityRow';
 import { ClassificationSection } from '../features/Classification';
 import { AccountContracts } from '../features/contracts/AccountContracts';
 import { IxcFinance, IxcOrders } from '../features/ixc/IxcPanels';
+import { EntitySupport } from '../features/support/EntitySupport';
 import { AccountEditButtons } from '../features/accounts/AccountEdit';
 
 type Detail = {
@@ -214,6 +215,7 @@ export function CustomerDetailPage() {
             { key: 'atendimentos', label: 'Atendimentos/OS' },
             ...(c.segment !== 'residencial' ? [{ key: 'stakeholders', label: 'Stakeholders' }, { key: 'relacoes', label: 'Contas relacionadas' }] : []),
             { key: 'brindes', label: 'Brindes' },
+            { key: 'apoio', label: 'Comentários e apoio' },
           ]} />
         </div>
         <div className="p-5" role="tabpanel">
@@ -269,6 +271,7 @@ export function CustomerDetailPage() {
           {tab === 'stakeholders' && <StakeholdersPanel contactId={c.id} />}
           {tab === 'brindes' && <AccountGifts contactId={c.id} name={c.name} />}
           {tab === 'relacoes' && <AccountRelationsPanel contactId={c.id} />}
+          {tab === 'apoio' && <EntitySupport entityType="conta" entityId={c.id} />}
           {FUTURE_TABS[tab] && <EmptyState title="Ainda sem dados" description={FUTURE_TABS[tab]} />}
         </div>
       </div>

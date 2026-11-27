@@ -13,6 +13,7 @@ import { api } from '../../lib/api';
 import { fmtBRL, fmtDate, fmtDateTime } from '../../lib/format';
 import { Breadcrumb, Button, Chip, EmptyState, ErrorState, FormField, Input, LoadingRows, Notice, Select, Tabs, Textarea } from '../../components/ui/primitives';
 import { Drawer, Modal, useToast } from '../../components/ui/overlay';
+import { EntitySupport } from '../../features/support/EntitySupport';
 import { ContractForm, formFrom, payloadOf, type FormState } from '../../features/contracts/ContractForm';
 import { ProcessPanel } from '../../features/contracts/ProcessPanel';
 import { LedgerPanel } from '../../features/contracts/LedgerPanel';
@@ -31,7 +32,7 @@ import { IssueOfficeModal, OfficesList } from '../../features/offices/ContractOf
 import { AlertsPanel, DocumentsPanel, TimelinePanel, UploadModal, VersionsPanel } from '../../features/contracts/ContractPanels';
 import { DaysLeft, KIND_LABEL, PendBadge, StageChip, TypeChip, errMsg, type ContractDetail } from '../../features/contracts/shared';
 
-type Tab = 'resumo' | 'zenith' | 'empenhos' | 'execucao' | 'aditivos' | 'consumo' | 'extrato' | 'processos' | 'erp' | 'documentos' | 'versoes' | 'notificacoes' | 'projetos' | 'pessoas' | 'historico';
+type Tab = 'resumo' | 'zenith' | 'empenhos' | 'execucao' | 'aditivos' | 'consumo' | 'extrato' | 'processos' | 'erp' | 'documentos' | 'versoes' | 'notificacoes' | 'projetos' | 'pessoas' | 'apoio' | 'historico';
 
 function Info({ label, children }: { label: string; children: React.ReactNode }) {
   return <div><dt className="text-sm text-muted">{label}</dt><dd className="text-ink">{children}</dd></div>;
@@ -181,6 +182,7 @@ export function ContractDetailPage() {
             { key: 'notificacoes', label: 'Notificações', count: openAlerts.length },
             ...(can('projetos') ? [{ key: 'projetos' as Tab, label: 'Tarefas e projetos' }] : []),
             ...(feature('marketing.abm') ? [{ key: 'pessoas' as Tab, label: 'Pessoas e ABM' }] : []),
+            { key: 'apoio', label: 'Comentários e apoio' },
             { key: 'historico', label: 'Linha do tempo' },
           ]} />
         </div>
@@ -238,6 +240,7 @@ export function ContractDetailPage() {
           {tab === 'documentos' && <DocumentsPanel c={c} onUpload={(o) => setUpload({ newVersionOf: o.newVersionOf })} onGenerate={() => setGenerate(true)} onSign={setSign} />}
           {tab === 'versoes' && <VersionsPanel c={c} />}
           {tab === 'notificacoes' && <div className="space-y-6"><ContractCommRuns contractId={c.id} /><ReportNotices contractId={c.id} /><AlertsPanel c={c} /></div>}
+          {tab === 'apoio' && <EntitySupport entityType="contrato" entityId={c.id} />}
           {tab === 'historico' && <TimelinePanel c={c} />}
           {tab === 'pessoas' && <EntityPeoplePanel entity="contrato" entityId={c.id} compact />}
           {tab === 'projetos' && <WorkLinks prefill={{ contractId: c.id, contactId: c.contactId, label: `CT-${c.code} · ${c.contact.name}`, kind: 'implantacao', name: `Implantação ${c.contact.name}` }} />}

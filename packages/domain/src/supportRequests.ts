@@ -32,8 +32,9 @@ export function supportSettingsErrors(x: SupportSettings | undefined): string[] 
 }
 
 /** Ações permitidas no estado atual (quem pode fazer cada uma é conferido no servidor). */
-export const SUPPORT_NEXT: Record<SupportStatus, ('assumir' | 'atendido' | 'confirmar' | 'reabrir' | 'cancelar' | 'desistir')[]> = {
-  aberto: ['assumir', 'cancelar'],
+export const SUPPORT_NEXT: Record<SupportStatus, ('assumir' | 'apoiei' | 'atendido' | 'confirmar' | 'reabrir' | 'cancelar' | 'desistir')[]> = {
+  // "apoiei": já ajudei — assume e marca como atendido de uma vez (vai para quem pediu confirmar)
+  aberto: ['apoiei', 'assumir', 'cancelar'],
   assumido: ['atendido', 'desistir', 'cancelar'],
   atendido: ['confirmar', 'reabrir'],
   confirmado: [],

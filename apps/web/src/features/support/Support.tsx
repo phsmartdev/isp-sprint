@@ -21,7 +21,7 @@ export type SupportItem = {
   requester: { id: string; name: string | null }; helper: { id: string; name: string | null } | null;
   target: { kind: 'time' | 'pessoa'; id: string; name: string | null }; entity: { type: string; id: string | null; label: string | null } | null;
   taskPoints: number | null; doneNote: string | null; createdAt: string; canTake: boolean;
-  actions: ('assumir' | 'atendido' | 'desistir' | 'confirmar' | 'reabrir' | 'cancelar')[];
+  actions: ('apoiei' | 'assumir' | 'atendido' | 'desistir' | 'confirmar' | 'reabrir' | 'cancelar')[];
 };
 export type SupportData = { toMe: SupportItem[]; taken: SupportItem[]; mine: SupportItem[]; helped: SupportItem[]; rule: SupportSettings | null; waiting: number };
 
@@ -96,6 +96,14 @@ export function HeaderSupport() {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => { const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setMenu(false); }; document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h); }, []);
   const n = (q.data?.toMe.length ?? 0) + (q.data?.waiting ?? 0);
+  const qc = useQueryClient();
+  const toast = useToast();
+  // "Apoiei": já ajudei — sai da lista e vai para quem pediu confirmar
+  const quick = useMutation({
+    mutationFn: (id: string) => api(`/apoio/${id}/apoiei`, { method: 'POST', body: { note: null } }),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ['apoio'] }); toast({ tone: 'success', message: 'Apoio registrado: falta quem pediu confirmar' }); },
+    onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
+  });
   return (
     <div ref={ref} className="relative">
       <button type="button" onClick={() => setMenu(!menu)} aria-expanded={menu} aria-label={n ? `Apoio: ${n} esperando por você` : 'Apoio'} title="Pedido de apoio"
@@ -104,8 +112,18 @@ export function HeaderSupport() {
         {n > 0 && <span className="num absolute right-1 top-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-circle bg-[#F5B400] px-1 text-[11px] font-bold text-navy">{n}</span>}
       </button>
       {menu && (
-        <div className="absolute right-0 top-12 z-40 w-72 border border-line bg-surface shadow-lg" role="menu">
+        <div className="absolute right-0 top-12 z-40 w-80 max-w-[calc(100vw-2rem)] border border-line bg-surface shadow-lg" role="menu">
           <button role="menuitem" className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-semibold text-ink hover:bg-surface-2" onClick={() => { setMenu(false); setAsking(true); }}><HandHelping className="h-4 w-4 text-primary" aria-hidden />Pedir apoio</button>
+          {!!q.data?.toMe.length && (
+            <ul className="max-h-64 divide-y divide-line overflow-y-auto border-t border-line" aria-label="Pedidos para você">
+              {q.data.toMe.slice(0, 6).map((r) => (
+                <li key={r.id} className="flex items-start justify-between gap-2 px-4 py-2.5">
+                  <Link to={`/apoio#apoio-${r.id}`} onClick={() => setMenu(false)} className="min-w-0 text-sm hover:underline"><span className="block truncate font-semibold text-ink">{r.title}</span><span className="block truncate text-xs text-muted">{r.requester.name}{r.target.kind === 'time' ? ` · time ${r.target.name}` : ''}</span></Link>
+                  {r.actions.includes('apoiei') && <Button size="sm" variant="secondary" loading={quick.isPending && quick.variables === r.id} onClick={() => quick.mutate(r.id)}>Apoiei</Button>}
+                </li>
+              ))}
+            </ul>
+          )}
           <Link role="menuitem" to="/apoio" onClick={() => setMenu(false)} className="flex items-center justify-between border-t border-line px-4 py-3 text-sm text-ink hover:bg-surface-2">
             <span>Pedidos de apoio</span>
             {n > 0 && <span className="num text-xs font-semibold text-primary">{q.data!.toMe.length ? `${q.data!.toMe.length} para você` : ''}{q.data!.toMe.length && q.data!.waiting ? ' · ' : ''}{q.data!.waiting ? `${q.data!.waiting} para confirmar` : ''}</span>}
@@ -117,7 +135,7 @@ export function HeaderSupport() {
   );
 }
 
-const ACTION_LABEL: Record<SupportItem['actions'][number], string> = { assumir: 'Assumir', atendido: 'Marcar como atendido', desistir: 'Devolver', confirmar: 'Confirmar apoio', reabrir: 'Ainda falta', cancelar: 'Cancelar pedido' };
+const ACTION_LABEL: Record<SupportItem['actions'][number], string> = { apoiei: 'Apoiei', assumir: 'Assumir', atendido: 'Marcar como atendido', desistir: 'Devolver', confirmar: 'Confirmar apoio', reabrir: 'Ainda falta', cancelar: 'Cancelar pedido' };
 const NEEDS_NOTE = new Set(['atendido', 'reabrir', 'cancelar']);
 
 export function SupportCard({ r, highlight }: { r: SupportItem; highlight?: boolean }) {
@@ -127,7 +145,7 @@ export function SupportCard({ r, highlight }: { r: SupportItem; highlight?: bool
   const [note, setNote] = useState('');
   const act = useMutation({
     mutationFn: (x: { a: string; note?: string }) => api(`/apoio/${r.id}/${x.a}`, { method: 'POST', body: { note: x.note || null } }),
-    onSuccess: (_d, x) => { void qc.invalidateQueries({ queryKey: ['apoio'] }); void qc.invalidateQueries({ queryKey: ['meus-pontos'] }); setAsk(null); setNote(''); toast({ tone: 'success', message: x.a === 'confirmar' ? 'Apoio confirmado: pontos lançados' : x.a === 'assumir' ? 'Pedido assumido' : 'Pedido atualizado' }); },
+    onSuccess: (_d, x) => { void qc.invalidateQueries({ queryKey: ['apoio'] }); void qc.invalidateQueries({ queryKey: ['meus-pontos'] }); setAsk(null); setNote(''); toast({ tone: 'success', message: x.a === 'confirmar' ? 'Apoio confirmado: pontos lançados' : x.a === 'apoiei' ? 'Apoio registrado: falta quem pediu confirmar' : x.a === 'assumir' ? 'Pedido assumido' : 'Pedido atualizado' }); },
     onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
   });
   const entityHref = r.entity?.id ? ({ oportunidade: `/opportunities/${r.entity.id}`, contrato: `/contracts/${r.entity.id}`, conta: `/customers/${r.entity.id}`, projeto: `/projetos/${r.entity.id}`, tarefa: `/tarefas?task=${r.entity.id}` } as Record<string, string>)[r.entity.type] : null;
@@ -149,7 +167,7 @@ export function SupportCard({ r, highlight }: { r: SupportItem; highlight?: bool
       {r.doneNote && <p className="mt-2 border-l-2 border-line pl-2 text-sm text-ink">{r.doneNote}</p>}
       {!!r.actions.length && (
         <div className="mt-3 flex flex-wrap gap-2">
-          {r.actions.map((a) => <Button key={a} size="sm" variant={a === 'assumir' || a === 'confirmar' || a === 'atendido' ? 'primary' : 'secondary'} loading={act.isPending && act.variables?.a === a} onClick={() => (NEEDS_NOTE.has(a) ? setAsk(a) : act.mutate({ a }))}>{ACTION_LABEL[a]}</Button>)}
+          {r.actions.map((a) => <Button key={a} size="sm" variant={a === 'apoiei' || a === 'confirmar' || a === 'atendido' ? 'primary' : 'secondary'} loading={act.isPending && act.variables?.a === a} onClick={() => (NEEDS_NOTE.has(a) ? setAsk(a) : act.mutate({ a }))}>{ACTION_LABEL[a]}</Button>)}
         </div>
       )}
       <Modal open={!!ask} onClose={() => setAsk(null)} title={ask ? ACTION_LABEL[ask] : ''} footer={<><Button variant="ghost" onClick={() => setAsk(null)}>Voltar</Button><Button variant="primary" disabled={ask !== 'atendido' && note.trim().length < 5} loading={act.isPending} onClick={() => ask && act.mutate({ a: ask, note })}>{ask ? ACTION_LABEL[ask] : ''}</Button></>}>

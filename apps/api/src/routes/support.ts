@@ -11,6 +11,7 @@ import type { AuthContext } from '../http/context';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import { gamificationSettingsOf } from '../services/gamification';
+import { level } from '../services/scope';
 import { seesAllTeams } from '../services/results';
 import { leadsOrManages, vacationOrg, type VacationOrg } from '../services/vacations';
 
@@ -96,7 +97,7 @@ export const supportRoutes = [
         target: r.teamId ? { kind: 'time' as const, id: r.teamId, name: org.teamNames[r.teamId] ?? 'Time' } : { kind: 'pessoa' as const, id: r.targetUserId!, name: nm(r.targetUserId) },
         entity: r.entityType ? { type: r.entityType, id: r.entityId, label: r.entityLabel } : null, taskPoints: r.taskPoints,
         doneNote: r.doneNote, createdAt: r.createdAt, canTake: r.status === 'aberto' && canTake(auth, org, r),
-        actions: SUPPORT_NEXT[r.status as SupportStatus].filter((a) => (a === 'assumir' ? canTake(auth, org, r) : a === 'atendido' || a === 'desistir' ? r.helperId === auth.userId : r.requesterId === auth.userId)),
+        actions: SUPPORT_NEXT[r.status as SupportStatus].filter((a) => (a === 'assumir' || a === 'apoiei' ? canTake(auth, org, r) : a === 'atendido' || a === 'desistir' ? r.helperId === auth.userId : r.requesterId === auth.userId)),
       });
       const visible = rows.filter((r) => canSee(auth, org, r));
       const toMe = visible.filter((r) => r.status === 'aberto' && canTake(auth, org, r)).map(dto);
@@ -134,8 +135,8 @@ export const supportRoutes = [
     },
   }),
   defineRoute({
-    method: 'POST', url: '/apoio/:id/:acao', summary: 'Assumir, marcar como atendido, desistir, confirmar (dá os pontos), reabrir ou cancelar o pedido', tag: 'Gestão de Times', anyAuthenticated: true,
-    params: IdParams.extend({ acao: z.enum(['assumir', 'atendido', 'desistir', 'confirmar', 'reabrir', 'cancelar']) }), body: Act,
+    method: 'POST', url: '/apoio/:id/:acao', summary: 'Assumir, apoiei (assume e já marca atendido), marcar como atendido, desistir, confirmar (dá os pontos), reabrir ou cancelar o pedido', tag: 'Gestão de Times', anyAuthenticated: true,
+    params: IdParams.extend({ acao: z.enum(['assumir', 'apoiei', 'atendido', 'desistir', 'confirmar', 'reabrir', 'cancelar']) }), body: Act,
     handler: async ({ app, auth, params, body }) => app.db.transaction(async (tx) => {
       await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`apoio:${params.id}`}))`);
       const { r, org } = await load(tx, auth, params.id);
@@ -144,7 +145,8 @@ export const supportRoutes = [
       const me = auth.userId;
       const set: Partial<typeof s.supportRequests.$inferInsert> = {};
       let notify: (string | null)[] = [];
-      if (a === 'assumir') { if (!canTake(auth, org, r)) throw forbidden('Este pedido é para outra pessoa ou outro time.'); Object.assign(set, { status: 'assumido', helperId: me, acceptedAt: new Date() }); notify = [r.requesterId]; }
+      if (a === 'apoiei') { if (!canTake(auth, org, r)) throw forbidden('Este pedido é para outra pessoa ou outro time.'); Object.assign(set, { status: 'atendido', helperId: me, acceptedAt: new Date(), doneAt: new Date(), doneNote: body.note || null }); notify = [r.requesterId]; }
+      else if (a === 'assumir') { if (!canTake(auth, org, r)) throw forbidden('Este pedido é para outra pessoa ou outro time.'); Object.assign(set, { status: 'assumido', helperId: me, acceptedAt: new Date() }); notify = [r.requesterId]; }
       else if (a === 'atendido') { if (r.helperId !== me) throw forbidden('Só quem assumiu marca como atendido.'); Object.assign(set, { status: 'atendido', doneAt: new Date(), doneNote: body.note || null }); notify = [r.requesterId]; }
       else if (a === 'desistir') { if (r.helperId !== me) throw forbidden('Só quem assumiu pode devolver.'); Object.assign(set, { status: 'aberto', helperId: null, acceptedAt: null }); notify = [r.requesterId]; }
       else {
@@ -154,9 +156,46 @@ export const supportRoutes = [
         else { if (!body.note || body.note.length < 5) throw unprocessable('Diga por que está cancelando.'); Object.assign(set, { status: 'cancelado', cancelledAt: new Date(), cancelReason: body.note }); notify = [r.helperId, r.targetUserId]; }
       }
       const [u] = await tx.update(s.supportRequests).set(set).where(eq(s.supportRequests.id, r.id)).returning();
-      await event(tx, auth, u!, a === 'atendido' ? 'atendido' : a === 'confirmar' ? 'confirmado' : a === 'assumir' ? 'assumido' : a === 'reabrir' ? 'reaberto' : a === 'desistir' ? 'devolvido' : 'cancelado', notify, body.note);
+      await event(tx, auth, u!, a === 'atendido' || a === 'apoiei' ? 'atendido' : a === 'confirmar' ? 'confirmado' : a === 'assumir' ? 'assumido' : a === 'reabrir' ? 'reaberto' : a === 'desistir' ? 'devolvido' : 'cancelado', notify, body.note);
       return u;
     }),
+  }),
+  defineRoute({
+    method: 'GET', url: '/apoio/item/:entityType/:entityId', summary: 'Comentários e pedidos de apoio ligados a um item (contrato, conta, projeto...)', tag: 'Gestão de Times', anyAuthenticated: true,
+    params: z.object({ entityType: z.enum(ENTITY), entityId: z.string().uuid() }),
+    handler: async ({ app, auth, params }) => {
+      // só quem acessa o módulo do item lê os comentários dele
+      const mod = ({ contrato: 'contratos', conta: 'clientes', oportunidade: 'oportunidades', projeto: 'projetos', tarefa: 'atividades' } as const)[params.entityType];
+      if (level(auth, mod) === 'nenhum') throw forbidden('Sem acesso a este módulo.');
+      const rows = await app.db.select().from(s.supportRequests).where(and(eq(s.supportRequests.tenantId, auth.tenantId), eq(s.supportRequests.entityType, params.entityType), eq(s.supportRequests.entityId, params.entityId))).orderBy(desc(s.supportRequests.createdAt)).limit(100);
+      const users = await app.db.select({ id: s.users.id, name: s.users.name }).from(s.users).where(eq(s.users.tenantId, auth.tenantId));
+      const nm = (id: string | null) => (id ? users.find((u) => u.id === id)?.name ?? null : null);
+      return { items: rows.map((r) => ({ id: r.id, title: r.title, description: r.description, status: r.status, createdAt: r.createdAt, requester: nm(r.requesterId), target: r.targetUserId ? nm(r.targetUserId) : null, helper: nm(r.helperId), doneNote: r.doneNote })) };
+    },
+  }),
+  defineRoute({
+    method: 'POST', url: '/apoio/mencao', summary: 'Comentário com @menção num item: cada pessoa mencionada recebe um pedido de apoio ligado ao item', tag: 'Gestão de Times', anyAuthenticated: true,
+    body: z.object({ entityType: z.enum(ENTITY), entityId: z.string().uuid(), text: z.string().trim().min(3, 'Escreva o que precisa').max(2000), userIds: z.array(z.string().uuid()).min(1, 'Mencione ao menos uma pessoa com @').max(10), dueOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional() }),
+    handler: async ({ app, auth, body, reply }) => {
+      const ids = [...new Set(body.userIds)].filter((id) => id !== auth.userId);
+      if (!ids.length) throw unprocessable('Mencione outra pessoa.');
+      const ok = await app.db.select({ id: s.users.id }).from(s.users).where(and(eq(s.users.tenantId, auth.tenantId), eq(s.users.active, true), inArray(s.users.id, ids)));
+      if (ok.length !== ids.length) throw unprocessable('Pessoa mencionada não encontrada.');
+      const { settings } = await gamificationSettingsOf(app.db, auth.tenantId);
+      const ent = await entityOf(app.db, auth.tenantId, body.entityType, body.entityId, settings);
+      const title = body.text.split('\n')[0]!.slice(0, 160);
+      const created = await app.db.transaction(async (tx) => {
+        const out: string[] = [];
+        for (const uid of ids) {
+          const [r] = await tx.insert(s.supportRequests).values({ tenantId: auth.tenantId, requesterId: auth.userId, teamId: null, targetUserId: uid, title: title.length >= 3 ? title : 'Pedido de apoio', description: body.text, dueOn: body.dueOn ?? null, entityType: body.entityType, entityId: body.entityId, entityLabel: ent.label, taskPoints: ent.taskPoints }).returning();
+          await event(tx, auth, r!, 'pedido', [uid], body.text);
+          out.push(r!.id);
+        }
+        return out;
+      });
+      reply.code(201);
+      return { ids: created };
+    },
   }),
   defineRoute({
     method: 'GET', url: '/apoio/:id/historico', summary: 'Histórico do pedido de apoio', tag: 'Gestão de Times', anyAuthenticated: true, params: IdParams,

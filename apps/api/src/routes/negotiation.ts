@@ -1,4 +1,5 @@
 /** Chat interno, comentários e menções da negociação. */
+import { and, eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { ensureVacationAlerts, todayIn } from '../services/vacations';
 import * as s from '../db/schema';
@@ -103,13 +104,29 @@ export const negotiationRoutes = [
   defineRoute({
     method: 'GET',
     url: '/me/mentions',
-    summary: 'Onde me mencionaram (chat e comentários), com não lidas',
+    summary: 'Onde me mencionaram (chat e comentários), com não lidas. scope: sino ou mencoes (cada painel tem o seu "Limpar")',
     tag: 'Negociação',
     anyAuthenticated: true,
-    handler: async ({ app, auth }) => {
+    query: z.object({ scope: z.enum(['sino', 'mencoes']).default('sino') }),
+    handler: async ({ app, auth, query }) => {
       // aviso de férias N dias antes (gerado aqui, quando o sino consulta)
       await ensureVacationAlerts(app.db, app.config, auth.tenantId, todayIn(auth.timezone)).catch((e) => console.error('aviso de férias', e));
-      return myMentions(app.db, auth);
+      const [cl] = await app.db.select({ at: s.userFeedClears.clearedAt }).from(s.userFeedClears).where(and(eq(s.userFeedClears.userId, auth.userId), eq(s.userFeedClears.scope, query.scope))).limit(1);
+      return myMentions(app.db, auth, cl?.at ?? null);
+    },
+  }),
+  defineRoute({
+    method: 'POST',
+    url: '/me/notificacoes/limpar',
+    summary: 'Limpa o painel (sino ou menções): o que chegou até agora some; o que chegar depois aparece normalmente',
+    tag: 'Negociação',
+    anyAuthenticated: true,
+    body: z.object({ scope: z.enum(['sino', 'mencoes']) }),
+    handler: async ({ app, auth, body }) => {
+      const now = new Date();
+      await app.db.insert(s.userFeedClears).values({ tenantId: auth.tenantId, userId: auth.userId, scope: body.scope, clearedAt: now })
+        .onConflictDoUpdate({ target: [s.userFeedClears.userId, s.userFeedClears.scope], set: { clearedAt: now } });
+      return { ok: true, clearedAt: now };
     },
   }),
 ];
