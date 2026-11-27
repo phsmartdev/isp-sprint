@@ -5,7 +5,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 import nodemailer from 'nodemailer';
 import { and, eq } from 'drizzle-orm';
-import { renderTemplate, type EmailTemplateKey } from '@isp/shared';
+import { emailTemplateOf, renderTemplate, type EmailTemplateKey } from '@isp/shared';
 import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import { getActiveInstruction } from './instructions';
@@ -155,7 +155,7 @@ export async function sendEmail(db: DbOrTx, input: SendInput): Promise<SendResul
 /** Monta assunto e corpo a partir do modelo de e-mail da instrução ativa. */
 export async function renderEmail(db: DbOrTx, tenantId: string, keyName: EmailTemplateKey, vars: Record<string, string | number | null | undefined>) {
   const { content } = await getActiveInstruction(db, tenantId);
-  const t = content.emails.modelos[keyName];
+  const t = emailTemplateOf(content, keyName);
   return { subject: renderTemplate(t.assunto, vars), text: renderTemplate(t.corpo, vars) };
 }
 
