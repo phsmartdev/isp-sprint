@@ -17,6 +17,8 @@ const like = (q: string) => `%${q.replace(/[%_\\]/g, '\\$&')}%`;
 const owner = alias(s.users, 'cust_owner');
 /** Carteira de clientes: o nível do módulo Clientes filtra pelo responsável do contato. */
 const scope = (auth: AuthContext) => ownerScope(auth, 'clientes', { tenantId: s.contacts.tenantId, ownerId: s.contacts.ownerId, deletedAt: s.contacts.deletedAt });
+/** As contas são da empresa (26/11/2026): quem acessa Clientes lê todas na lista, na busca e na ficha. Alterar e excluir seguem o nível. */
+const readScope = (auth: AuthContext) => (level(auth, 'clientes') === 'nenhum' ? scope(auth) : and(eq(s.contacts.tenantId, auth.tenantId), isNull(s.contacts.deletedAt))!);
 
 export const contactRoutes = [
   defineRoute({
@@ -96,7 +98,7 @@ export const contactRoutes = [
         .select({ id: s.contacts.id, name: s.contacts.name, phone: s.contacts.phone, email: s.contacts.email, segment: s.contacts.segment, customerId: s.customers.id, lifecycle: s.customers.lifecycle, externalId: s.customers.externalId })
         .from(s.contacts)
         .leftJoin(s.customers, eq(s.customers.contactId, s.contacts.id))
-        .where(and(scope(auth), or(ilike(s.contacts.name, like(query.q)), ilike(s.contacts.phone, like(query.q)), ilike(s.contacts.email, like(query.q)), eq(s.customers.externalId, query.q))))
+        .where(and(readScope(auth), or(ilike(s.contacts.name, like(query.q)), ilike(s.contacts.phone, like(query.q)), ilike(s.contacts.email, like(query.q)), eq(s.customers.externalId, query.q))))
         .orderBy(sql`${s.customers.id} is null`, s.contacts.name)
         .limit(10);
       return { items: rows };
@@ -137,7 +139,7 @@ export const contactRoutes = [
                  count(*) filter (where cu.lifecycle = 'em_implantacao')::int implantacao,
                  count(*) filter (where cu.lifecycle in ('ativo','reativado','inadimplente') and cu.next_due_on between current_date and current_date + 30)::int vencer
           from ${s.contacts} join ${s.customers} cu on cu.contact_id = ${s.contacts.id}
-          where ${scope(auth)}`)
+          where ${readScope(auth)}`)
       ).rows;
       const noHistory = 'Sem histórico para comparar: a evolução da base chega com a sincronização do IXC.';
       return {
@@ -159,7 +161,7 @@ export const contactRoutes = [
     module: 'clientes',
     query: CustomerListQuery,
     handler: async ({ app, auth, query }) => {
-      const where: SQL[] = [scope(auth)];
+      const where: SQL[] = [readScope(auth)];
       if (query.q) where.push(or(ilike(s.contacts.name, like(query.q)), ilike(s.contacts.phone, like(query.q)), eq(s.customers.externalId, query.q))!);
       if (query.lifecycle === 'prospect') where.push(isNull(s.customers.id));
       else if (query.lifecycle) where.push(eq(s.customers.lifecycle, query.lifecycle));
@@ -244,7 +246,7 @@ export const contactRoutes = [
         .leftJoin(s.customers, eq(s.customers.contactId, s.contacts.id))
         .leftJoin(s.plans, eq(s.plans.id, s.customers.planId))
         .leftJoin(owner, eq(owner.id, s.contacts.ownerId))
-        .where(and(eq(s.contacts.id, params.id), scope(auth)))
+        .where(and(eq(s.contacts.id, params.id), readScope(auth)))
         .limit(1);
       if (!c) throw notFound('Cliente não encontrado.');
       const externalIds = c.customerId

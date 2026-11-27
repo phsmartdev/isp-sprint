@@ -45,7 +45,19 @@ test('editar conta, corrigir contato do stakeholder e excluir conta sem vínculo
   await d2.getByRole('button', { name: 'Excluir conta' }).click();
   await expect(page).toHaveURL(/\/customers$/);
 
-  await page.getByRole('combobox', { name: 'Segmento' }).selectOption('governamental');
+  await expect(page.getByRole('table', { name: 'Lista de clientes' })).toBeVisible();
+  await expect(async () => {
+    await page.getByRole('combobox', { name: 'Segmento' }).selectOption('governamental');
+    await expect(page).toHaveURL(/segment=governamental/, { timeout: 1500 });
+  }).toPass({ timeout: 10_000 });
   await page.getByRole('button', { name: 'Limpar filtros' }).click();
   await expect(page.getByRole('button', { name: 'Limpar filtros' })).toHaveCount(0);
+
+  // conta da empresa: outro consultor abre a ficha (só leitura: sem o botão de editar)
+  await page.context().clearCookies();
+  await login(page, 'rafael@yepnet.test');
+  await page.goto(`/customers/${acc.id}`);
+  await expect(page.getByRole('heading', { name: `Órgão Editável ${stamp}` })).toBeVisible();
+  await expect(page.getByText(/não encontrad/i)).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Editar conta' })).toHaveCount(0);
 });

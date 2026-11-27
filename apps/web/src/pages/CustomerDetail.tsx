@@ -153,7 +153,9 @@ const FUTURE_TABS: Record<string, string> = {};
 
 export function CustomerDetailPage() {
   const { id = '' } = useParams();
-  const { can, feature, action } = useAuth();
+  const { can, feature, action, me } = useAuth();
+  // a conta é da empresa (todos leem); alterar segue o nível: no Próprio, só a do próprio responsável
+  const mayEdit = (c: { ownerId: string | null }) => can('clientes', 'equipe') || (can('clientes') && c.ownerId === me?.user.id);
   const nav = useNavigate();
   const [tab, setTab] = useState(() => new URLSearchParams(window.location.search).get('t') ?? 'resumo');
   const q = useQuery({ queryKey: ['contact', id], queryFn: () => api<Detail>(`/contacts/${id}`) });
@@ -185,7 +187,7 @@ export function CustomerDetailPage() {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          {can('clientes') && <AccountEditButtons account={c} />}
+          {mayEdit(c) && <AccountEditButtons account={c} />}
           {feature('marketing.abm') && <AddToAbmButton contactId={id} contactName={c.name} />}
           {can('oportunidades') && <Button variant="primary" size="lg" onClick={() => nav('/opportunities/new')}>+ Nova oportunidade</Button>}
         </div>

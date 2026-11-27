@@ -23,8 +23,6 @@ export function ownerScope(auth: AuthContext, m: Module, cols: { tenantId: PgCol
   const parts: SQL[] = [eq(cols.tenantId, auth.tenantId)];
   if (cols.deletedAt) parts.push(isNull(cols.deletedAt));
   const l = level(auth, m);
-  // as contas são da empresa (26/11/2026): quem tem acesso ao módulo Clientes lê todas; alterar continua pelo nível
-  if (m === 'clientes' && l !== 'nenhum' && auth.requestMethod === 'GET') return and(...parts)!;
   if (l === 'nenhum') parts.push(sql`false`);
   else if (l === 'proprio') parts.push(eq(cols.ownerId, auth.userId));
   else if (l === 'equipe') parts.push(or(inArray(cols.ownerId, auth.teamMemberIds), isNull(cols.ownerId))!);

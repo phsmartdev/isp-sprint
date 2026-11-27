@@ -110,7 +110,8 @@ describe('níveis de acesso por perfil (matriz padrão)', () => {
       for (const it of r.items) if (!url.startsWith('/opportunities') || it.canEdit !== false) expect(it.ownerId).toBe(lucas.me.user.id);
     }
     const cust = (await lucas.get('/customers?pageSize=100')).json();
-    for (const c of cust.items) expect(c.ownerId).toBe(lucas.me.user.id);
+    // contas são da empresa (26/11/2026): a lista mostra também as dos colegas; editar continua só nas próprias
+    expect(cust.items.some((c: { ownerId: string }) => c.ownerId !== lucas.me.user.id)).toBe(true);
   });
 
   it('vendedor recebe 404 em oportunidade de colega e 403 em módulo sem acesso', async () => {

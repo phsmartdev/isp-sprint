@@ -4,7 +4,7 @@ import { login, makeApp, type Client } from './helpers';
 
 let ctx: Awaited<ReturnType<typeof makeApp>>;
 let carlos: Client, lucas: Client, rafael: Client;
-beforeAll(async () => { ctx = await makeApp(); [carlos, lucas, rafael] = await Promise.all(['carlos', 'lucas', 'rafael'].map((n) => login(ctx.app, `${n}@yepnet.test`))); });
+beforeAll(async () => { ctx = await makeApp(); [carlos, lucas, rafael] = (await Promise.all(['carlos', 'lucas', 'rafael'].map((n) => login(ctx.app, `${n}@yepnet.test`)))) as [Client, Client, Client]; });
 afterAll(async () => ctx.close());
 
 it('conta criada por um consultor é lida por outro, que pode abrir oportunidade nela, mas não editar', async () => {
