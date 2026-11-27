@@ -105,4 +105,6 @@ test('fura-fila: pedido, análise na ordem 10 → 20 → 70 e aprovação gerenc
   await expect(page.getByText('Enviado para aprovação da gerência')).toBeVisible();
   // nada muda enquanto a gerência não aprova
   await expect(page.getByRole('region', { name: 'A fazer' }).locator('article', { hasText: `Proposta fictícia ${st}` })).toBeVisible();
+  // encerra a Sprint (um quadro só tem uma Sprint em andamento por vez)
+  expect((await page.request.post(`/api/v1/quadros/comercial/sprints/${sprintId}/encerrar`, { data: {} })).ok()).toBe(true);
 });
