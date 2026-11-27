@@ -174,6 +174,16 @@ export const dataAdminRoutes = [
           await tx.delete(s.contractNotifications).where(and(eq(s.contractNotifications.tenantId, t), inArray(s.contractNotifications.activityId, acts)));
           // ofícios emitidos a partir das negociações apagadas
           await tx.delete(s.officeLetters).where(and(eq(s.officeLetters.tenantId, t), inArray(s.officeLetters.opportunityId, opps)));
+          // Quadros de Tarefas: Sprints, fura-filas e o histórico delas saem junto com as tarefas (configuração — equipes,
+          // diretriz 70/20/10, jornadas, feriados e ausências — fica)
+          await tx.delete(s.workSprintRequests).where(sc(s.workSprintRequests));
+          await tx.delete(s.workSprintItems).where(sc(s.workSprintItems));
+          // a Sprint (e o histórico dela) só sai quando nenhuma tarefa dela ficou (opção de manter negociações/contratos)
+          const emptySprint = sql`not exists (select 1 from work_sprint_items i where i.sprint_id = ${s.workSprints.id})`;
+          const gone = tx.select({ id: s.workSprints.id }).from(s.workSprints).where(and(eq(s.workSprints.tenantId, t), emptySprint));
+          await tx.delete(s.workSprintRequests).where(and(eq(s.workSprintRequests.tenantId, t), inArray(s.workSprintRequests.sprintId, gone)));
+          await tx.delete(s.workSprintEvents).where(and(eq(s.workSprintEvents.tenantId, t), inArray(s.workSprintEvents.sprintId, gone)));
+          await del('sprints', tx.delete(s.workSprints).where(and(eq(s.workSprints.tenantId, t), emptySprint)).returning({ id: s.workSprints.id }));
           await del('historico_atividades', tx.delete(s.activityEvents).where(inArray(s.activityEvents.activityId, acts)).returning({ id: s.activityEvents.id }));
           await del('atividades', tx.delete(s.activities).where(sc(s.activities)).returning({ id: s.activities.id }));
           // projetos: as tarefas já saíram; marcos, etapas, equipe, modelos e histórico saem junto

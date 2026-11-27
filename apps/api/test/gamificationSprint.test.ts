@@ -10,11 +10,14 @@ let carlos: Client, lucas: Client;
 let sprintId = '';
 beforeAll(async () => { ctx = await makeApp(); [carlos, lucas] = (await Promise.all(['carlos', 'lucas'].map((n) => login(ctx.app, `${n}@yepnet.test`)))) as [Client, Client]; });
 afterAll(async () => {
+  // eventos de negócio são append-only: ficam (o invalidado já registra que a origem foi desfeita)
   if (sprintId) {
-    await ctx.app.db.execute(sql`delete from business_events where idem_key like ${`sprint_tarefa_no_prazo:${sprintId}:%`}`);
     await ctx.app.db.execute(sql`delete from work_sprint_items where sprint_id = ${sprintId}`);
     await ctx.app.db.execute(sql`delete from work_sprints where id = ${sprintId}`);
   }
+  // este teste sincronizou os eventos agora: marca a última sincronização como antiga para os próximos testes
+  // (a comemoração só ressincroniza se a última tiver mais de 5 s)
+  await ctx.app.db.execute(sql`update business_event_sync set last_run_at = now() - interval '1 hour' where tenant_id = ${carlos.me.tenant.id}`);
   await ctx.close();
 });
 
