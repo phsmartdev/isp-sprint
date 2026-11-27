@@ -132,11 +132,18 @@ export const workSprintRoutes = [
         };
       });
       const selected = tasks.filter((t) => t.selected);
+      const furaFilas = sprint ? (await app.db.select({ n: sql<number>`count(*)::int` }).from(s.workSprintItems).where(and(eq(s.workSprintItems.sprintId, sprint.id), eq(s.workSprintItems.entry, 'fura_fila'), isNull(s.workSprintItems.removedAt))))[0]?.n ?? 0 : 0;
+      // seletor do cabeçalho: Sprints já criadas + a semana atual e a próxima
+      const known = await app.db.select({ weekStart: s.workSprints.weekStart, status: s.workSprints.status }).from(s.workSprints)
+        .where(and(eq(s.workSprints.tenantId, auth.tenantId), eq(s.workSprints.boardKey, board), sql`${s.workSprints.status} <> 'cancelada'`)).orderBy(desc(s.workSprints.weekStart)).limit(20);
+      const cur = weekStart(today);
+      const weeks = [...new Map([...[addDays(cur, 7), cur, week].map((w) => [w, null as string | null] as const), ...known.map((k) => [k.weekStart, k.status] as const)])]
+        .map(([w, status]) => ({ week: w, status: status ?? (known.find((k) => k.weekStart === w)?.status ?? null) })).sort((a, b) => b.week.localeCompare(a.week));
       const totalNet = people.reduce((t, p) => t + (p.netMinutes ?? 0), 0);
       const byPerson = people.map((p) => { const c = selected.filter((t) => t.ownerId === p.userId).reduce((t, x) => t + committed(x), 0); return { ...p, committedMinutes: c, overload: p.netMinutes === null ? c > 0 : c > p.netMinutes }; });
       const dist = distribution(selected.map((t) => ({ category: t.category, minutes: committed(t) })), policy);
       return {
-        week, today, role: ctx.role, board: { key: board, label: BOARD_LABELS[board] }, policy, sprint: sprint && { id: sprint.id, status: sprint.status, objective: sprint.objective, openedAt: sprint.openedAt },
+        week, today, role: ctx.role, board: { key: board, label: BOARD_LABELS[board] }, policy, weeks, furaFilas, sprint: sprint && { id: sprint.id, status: sprint.status, objective: sprint.objective, openedAt: sprint.openedAt },
         capacity: { totalNetMinutes: totalNet, selectedMinutes: dist.total, availableMinutes: totalNet - dist.total, targets: categoryTargets(totalNet, policy), distribution: dist.by, deviationPp: dist.deviationPp, tolerancePp: DEVIATION_TOLERANCE_PP, people: byPerson, withoutSchedule: byPerson.filter((p) => p.netMinutes === null).map((p) => p.name) },
         tasks,
       };

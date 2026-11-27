@@ -25,7 +25,10 @@ test('liderança planeja a semana, abre a Sprint e encerra com o comparativo', a
   expect((await api.put('/api/v1/admin/modules/crm', { data: { enabled: true, mode: 'todos', disabledFeatures: disabled, note: 'Teste: liga o quadro de tarefas' } })).ok()).toBe(true);
   const lk = await (await api.get('/api/v1/meta/lookups')).json();
   const residencial = lk.teams.find((t: { name: string }) => t.name === 'Residencial').id;
-  expect((await api.put('/api/v1/quadros/comercial/config', { data: { teamIds: [residencial], wipLimit: 3, wipCountsWaiting: false } })).ok()).toBe(true);
+  // configura só se o quadro ainda não tem a equipe (depois de configurado, só a gestão dele reconfigura)
+  const boards = await (await api.get('/api/v1/quadros')).json();
+  if (!boards.items.find((b: { key: string; teamIds: string[] }) => b.key === 'comercial')?.teamIds.includes(residencial))
+    expect((await api.put('/api/v1/quadros/comercial/config', { data: { teamIds: [residencial], wipLimit: 3, wipCountsWaiting: false } })).ok()).toBe(true);
 
   await login(page, 'lucas@yepnet.test');
   const t = await (await page.request.post('/api/v1/tasks', { data: { title: `Proposta fictícia da semana ${st}` } })).json();
@@ -35,9 +38,12 @@ test('liderança planeja a semana, abre a Sprint e encerra com o comparativo', a
   expect((await page.request.patch(`/api/v1/quadros/tarefas/${t.id}/planejamento`, { data: { rowVersion: rv.rowVersion ?? rv.task?.rowVersion, capacityCategory: 'comercial' } })).ok()).toBe(true);
 
   await page.goto(`/quadro/comercial?week=${week}`);
-  const bar = page.getByRole('region', { name: 'Sprint da semana' });
-  await expect(bar).toContainText('não planejada');
-  await bar.getByRole('button', { name: 'Planejar semana' }).click();
+  await expect(page.getByRole('heading', { name: 'Quadro do Comercial e Contratos' })).toBeVisible();
+  const resumo = page.getByRole('region', { name: 'Resumo da Sprint' });
+  await expect(resumo).toContainText('não planejada');
+  await expect(resumo).toContainText('Vencem em 2 dias');
+  await expect(resumo).toContainText('Fura-filas');
+  await page.getByRole('button', { name: 'Planejar Sprint' }).click();
   const dlg = page.getByRole('dialog', { name: /Planejar semana/ });
   await dlg.getByLabel('Objetivo da semana').fill('Fechar propostas fictícias');
   const pend = dlg.locator('li', { hasText: `Proposta fictícia da semana ${st}` });
@@ -51,10 +57,12 @@ test('liderança planeja a semana, abre a Sprint e encerra com o comparativo', a
   await page.screenshot({ path: 'test-results/planejar-semana.png' });
   await dlg.getByRole('button', { name: 'Abrir Sprint' }).click();
   await expect(page.getByText('Sprint aberta: o plano original ficou registrado')).toBeVisible();
-  await expect(bar).toContainText('Em andamento');
-  await expect(bar).toContainText('Fechar propostas fictícias');
+  await expect(resumo).toContainText('em andamento');
+  await expect(resumo).toContainText('Objetivo: Fechar propostas fictícias');
+  await expect(page.getByRole('region', { name: 'A fazer' }).locator('article', { hasText: `Proposta fictícia da semana ${st}` })).toBeVisible();
+  await page.screenshot({ path: 'test-results/quadro-comercial-sprint.png' });
 
-  await bar.getByRole('button', { name: 'Encerrar Sprint' }).click();
+  await page.getByRole('button', { name: 'Encerrar Sprint' }).click();
   const close = page.getByRole('dialog', { name: 'Encerrar Sprint' });
   await close.getByLabel('Aprendizados e impedimentos (opcional)').fill('Aprendizado fictício');
   await close.getByRole('button', { name: 'Encerrar Sprint' }).click();
@@ -64,5 +72,5 @@ test('liderança planeja a semana, abre a Sprint e encerra com o comparativo', a
   await expect(res).toContainText(`Proposta fictícia da semana ${st}`);
   await page.screenshot({ path: 'test-results/sprint-resultado.png' });
   await res.getByRole('button', { name: 'Fechar' }).first().click();
-  await expect(bar).toContainText('Encerrada');
+  await expect(resumo).toContainText('encerrada');
 });

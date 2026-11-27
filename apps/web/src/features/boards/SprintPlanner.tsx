@@ -1,7 +1,7 @@
 /**
  * Planejar Semana (liderança/gestão do time): escolhe as tarefas, ajusta responsável, esforço, prazo e ordem, vê a
  * capacidade de cada pessoa e a distribuição 70/20/10 em horas. Salvar = rascunho; Abrir Sprint = compromisso da semana.
- * Também: faixa da Sprint no quadro (situação, retirar com motivo, encerrar com o comparativo) e o cadastro de capacidade.
+ * Também: encerrar com o comparativo, retirar com motivo e o cadastro de capacidade (abertos pelo cabeçalho do quadro).
  */
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -31,6 +31,7 @@ type Person = { userId: string; name: string; allocationBp: number; netMinutes: 
 export type Plan = {
   week: string; today: string; role: 'gestao' | 'lideranca' | 'colaborador'; policy: Record<CapacityCategory, number> & { version: number };
   sprint: { id: string; status: SprintStatus; objective: string | null; openedAt: string | null } | null;
+  weeks: { week: string; status: SprintStatus | null }[]; furaFilas: number;
   capacity: { totalNetMinutes: number; selectedMinutes: number; availableMinutes: number; targets: Record<CapacityCategory, number>; distribution: Record<CapacityCategory, number>; deviationPp: number; tolerancePp: number; people: Person[]; withoutSchedule: string[] };
   tasks: PlanTask[];
 };
@@ -39,39 +40,7 @@ type Row = { id: string; ownerId: string; estimate: string; dueOn: string };
 export const usePlan = (board: BoardKey, week: string | undefined) =>
   useQuery({ queryKey: ['planejamento', board, week], queryFn: () => api<Plan>(`/quadros/${board}/planejamento${qs({ week })}`), enabled: !!week });
 
-/** Faixa da Sprint no topo do quadro: situação, objetivo e as ações de quem lidera. */
-export function SprintBar({ board, week }: { board: BoardKey; week: string }) {
-  const plan = usePlan(board, week);
-  const [planning, setPlanning] = useState(false);
-  const [closing, setClosing] = useState(false);
-  const [capacity, setCapacity] = useState(false);
-  const p = plan.data;
-  if (!p) return null;
-  const leads = p.role !== 'colaborador';
-  const st = p.sprint?.status;
-  return (
-    <section aria-label="Sprint da semana" className="flex flex-wrap items-center gap-3 border border-line bg-surface px-4 py-3">
-      <CalendarRange className="h-5 w-5 text-primary" aria-hidden />
-      <div className="min-w-0 flex-1">
-        <p className="text-sm font-bold text-ink">Sprint de {fmtDate(p.week)} a {fmtDate(addDays(p.week, 4))}: {st ? SPRINT_STATUS_LABELS[st] : 'não planejada'}</p>
-        <p className="text-xs text-muted">
-          {p.sprint?.objective ? `Objetivo: ${p.sprint.objective} · ` : ''}
-          {h(p.capacity.selectedMinutes)} planejadas de {h(p.capacity.totalNetMinutes)} disponíveis
-          {p.capacity.withoutSchedule.length ? ` · sem jornada cadastrada: ${p.capacity.withoutSchedule.join(', ')}` : ''}
-        </p>
-      </div>
-      {leads && st !== 'encerrada' && st !== 'andamento' && <Button size="sm" variant="primary" onClick={() => setPlanning(true)}>Planejar semana</Button>}
-      {leads && st === 'andamento' && <Button size="sm" variant="secondary" onClick={() => setPlanning(true)}>Ver o compromisso</Button>}
-      {leads && st === 'andamento' && <Button size="sm" variant="primary" onClick={() => setClosing(true)}>Encerrar Sprint</Button>}
-      <Button size="sm" variant="ghost" icon={<Users className="h-4 w-4" />} onClick={() => setCapacity(true)}>Capacidade</Button>
-      {planning && <PlannerModal board={board} plan={p} onClose={() => setPlanning(false)} />}
-      {closing && p.sprint && <CloseModal board={board} sprintId={p.sprint.id} onClose={() => setClosing(false)} />}
-      {capacity && <CapacityModal board={board} week={p.week} leads={leads} onClose={() => setCapacity(false)} />}
-    </section>
-  );
-}
-
-function PlannerModal({ board, plan, onClose }: { board: BoardKey; plan: Plan; onClose: () => void }) {
+export function PlannerModal({ board, plan, onClose }: { board: BoardKey; plan: Plan; onClose: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
   const locked = plan.sprint?.status === 'andamento';
@@ -230,7 +199,7 @@ type Closing = {
   replanned: { title: string; minutes: number; reason: string | null }[]; furaFilas: { title: string; minutes: number }[]; notDelivered: { title: string; minutes: number }[];
   impediments: { title: string; waitingOn: string | null }[]; finalDistribution: Record<CapacityCategory, number>;
 };
-function CloseModal({ board, sprintId, onClose }: { board: BoardKey; sprintId: string; onClose: () => void }) {
+export function CloseModal({ board, sprintId, onClose }: { board: BoardKey; sprintId: string; onClose: () => void }) {
   const qc = useQueryClient();
   const toast = useToast();
   const [learnings, setLearnings] = useState('');
@@ -275,7 +244,7 @@ type Cap = {
 };
 const WEEKDAYS: [string, string][] = [['1', 'Seg'], ['2', 'Ter'], ['3', 'Qua'], ['4', 'Qui'], ['5', 'Sex'], ['6', 'Sáb'], ['7', 'Dom']];
 
-function CapacityModal({ board, week, leads, onClose }: { board: BoardKey; week: string; leads: boolean; onClose: () => void }) {
+export function CapacityModal({ board, week, leads, onClose }: { board: BoardKey; week: string; leads: boolean; onClose: () => void }) {
   const q = useQuery({ queryKey: ['capacidade', board, week], queryFn: () => api<Cap>(`/quadros/${board}/capacidade${qs({ week })}`) });
   const [editing, setEditing] = useState<string | null>(null);
   const [absence, setAbsence] = useState(false);

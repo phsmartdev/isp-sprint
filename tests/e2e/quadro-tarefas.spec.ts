@@ -51,7 +51,7 @@ test('quadro do Comercial, envio ao Sucesso do Cliente e acompanhamento em Envia
   await page.keyboard.press('Escape');
   await expect(backlog.locator('article', { hasText: `fictício ${st}` })).toHaveCount(0);
 
-  await page.getByRole('radio', { name: 'Enviadas a outros times' }).click();
+  await page.getByLabel('Mostrar').selectOption('enviadas');
   const sent = page.getByRole('table', { name: 'Tarefas enviadas a outros times' });
   await expect(sent.getByRole('row', { name: new RegExp(`fictício ${st}`) })).toContainText('Sucesso do Cliente');
   await expect(sent.getByRole('row', { name: new RegExp(`fictício ${st}`) })).toContainText('aguardando planejamento');

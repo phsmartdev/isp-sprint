@@ -147,7 +147,7 @@ export const workBoardRoutes = [
             ownerId: a.ownerId, ownerName: r.ownerName, priority: a.priority, dueAt: a.dueAt, dueDay, agreedDueAt: a.agreedDueAt,
             category, categoryAuto: !a.capacityCategory && !!category, estimateMinutes: a.estimateMinutes, remainingMinutes: a.remainingMinutes,
             origin: taskOrigin(a), commercial: !!a.opportunityId, plannedWeek: a.plannedWeek, planned, planOrder: a.planOrder,
-            blocked: a.status === 'aguardando', waitingOn: a.waitingOn, protectedCommitment: a.protectedCommitment, observer: a.participants.includes(auth.userId),
+            blocked: a.status === 'aguardando', waitingOn: a.waitingOn, protectedCommitment: a.protectedCommitment, observer: a.participants.includes(auth.userId), observers: a.participants.length,
             overdue: !done && !!a.dueAt && a.dueAt.getTime() < now, dueToday: !done && dueDay === today,
             link: a.opportunityId ? { kind: 'oportunidade', label: `OP-${r.oppCode} · ${r.contactName ?? r.oppTitle ?? ''}`, to: `/opportunities/${a.opportunityId}`, valueCents: r.oppValue, stage: r.oppStage }
               : a.contractId ? { kind: 'contrato', label: `Contrato ${r.contractCode ?? ''}`, to: `/contracts/${a.contractId}` }
@@ -166,7 +166,7 @@ export const workBoardRoutes = [
           column: (c.column === 'revisao' ? 'em_revisao' : c.column) as ReturnType<typeof boardColumn>, rowVersion: c.rowVersion, ownerId: c.ownerId, ownerName, priority: c.priority,
           dueAt: c.dueOn ? new Date(`${c.dueOn}T12:00:00Z`) : null, dueDay: c.dueOn, agreedDueAt: null, category: null, categoryAuto: false, estimateMinutes: null, remainingMinutes: null,
           origin: 'marketing' as const, commercial: false, plannedWeek: null, planned: !!c.sprintId, planOrder: c.position, blocked: false, waitingOn: null, protectedCommitment: false,
-          observer: c.observerIds.includes(auth.userId), overdue: c.column !== 'concluido' && !!c.dueOn && c.dueOn < today, dueToday: c.column !== 'concluido' && c.dueOn === today,
+          observer: c.observerIds.includes(auth.userId), observers: c.observerIds.length, overdue: c.column !== 'concluido' && !!c.dueOn && c.dueOn < today, dueToday: c.column !== 'concluido' && c.dueOn === today,
           link: { kind: 'marketing', label: c.furaFila ? 'Quadro do Marketing · fura-fila' : 'Quadro do Marketing', to: `/marketing/quadro?card=${c.id}`, valueCents: null, stage: null },
           readOnly: true, completedAt: c.completedAt,
         })));
@@ -185,7 +185,7 @@ export const workBoardRoutes = [
             id: a.id, ref: `T-${a.id.slice(0, 6).toUpperCase()}`, title: a.title, type: a.type, status: a.status, column: boardColumn({ status: a.status, planned: !!a.plannedWeek }), rowVersion: a.rowVersion,
             ownerId: a.ownerId, ownerName, priority: a.priority, dueAt: a.dueAt, dueDay, agreedDueAt: a.agreedDueAt, category: taskCategory(a), categoryAuto: false, estimateMinutes: a.estimateMinutes, remainingMinutes: a.remainingMinutes,
             origin: taskOrigin(a), commercial: !!a.opportunityId, plannedWeek: a.plannedWeek, planned: !!a.plannedWeek, planOrder: a.planOrder, blocked: a.status === 'aguardando', waitingOn: a.waitingOn,
-            protectedCommitment: a.protectedCommitment, observer: true, overdue: !done && !!a.dueAt && a.dueAt.getTime() < now, dueToday: !done && dueDay === today,
+            protectedCommitment: a.protectedCommitment, observer: true, observers: a.participants.length, overdue: !done && !!a.dueAt && a.dueAt.getTime() < now, dueToday: !done && dueDay === today,
             link: { kind: 'enviada', label: `Com ${BOARD_LABELS[a.boardKey as BoardKey] ?? 'outro time'}`, to: '', valueCents: null, stage: null }, readOnly: true, completedAt: a.completedAt,
           };
         });
@@ -207,7 +207,8 @@ export const workBoardRoutes = [
       const plannedAll = all.filter((i) => i.planned);
       const minutes = (l: typeof all) => l.reduce((t, i) => t + (i.estimateMinutes ?? 0), 0);
       const dist = (l: typeof all) => Object.fromEntries(CAPACITY_CATEGORIES.map((c) => [c, minutes(l.filter((i) => i.category === c))])) as Record<CapacityCategory, number>;
-      const soon = new Date(now + 3 * 86_400_000);
+      // mesmo critério do Quadro do Marketing: vence em até 2 dias
+      const soon = new Date(now + 2 * 86_400_000);
       const kpis = {
         overdue: open.filter((i) => i.overdue).length,
         dueToday: open.filter((i) => i.dueToday).length,
@@ -216,6 +217,7 @@ export const workBoardRoutes = [
         uncategorized: open.filter((i) => !i.category && !i.readOnly).length,
         withoutEstimate: open.filter((i) => !i.estimateMinutes && !i.readOnly).length,
         commercialUnplanned: open.filter((i) => i.commercial && !i.planned).length,
+        inExecution: [...open.filter((i) => i.status === 'em_andamento' && !i.readOnly).reduce((m, i) => m.set(i.ownerName ?? '—', (m.get(i.ownerName ?? '—') ?? 0) + 1), new Map<string, number>())].map(([name, n]) => ({ name, n })),
         week: { plannedMinutes: minutes(plannedAll), doneMinutes: minutes(plannedAll.filter((i) => i.status === 'concluida')), plannedCount: plannedAll.length, doneCount: plannedAll.filter((i) => i.status === 'concluida').length, distribution: dist(plannedAll) },
         openDistribution: dist(open),
       };
