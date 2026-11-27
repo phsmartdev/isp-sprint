@@ -25,6 +25,8 @@ type HomeData = {
   performance: { key: string; label: string; value: number; target: number; progress: number | null }[];
   agenda: { id: string; type: ActivityType; title: string; notes: string | null; dueAt: string | null; completedAt: string | null; rowVersion: number; opportunityId: string | null; contractId?: string | null; contactId?: string | null; projectId?: string | null; overdue: boolean }[];
   pipelineName: string;
+  pipelineId?: string;
+  pipelines?: { id: string; name: string; open: number }[];
   pipeline: { stage: string; name: string; color: string | null; count: number; valueCents: number }[];
   recent: Opportunity[];
   strategy?: Record<string, Contribution | null>;
@@ -177,9 +179,9 @@ export function HomePage() {
   const qc = useQueryClient();
   const toast = useToast();
   const p0 = defaultPeriod();
-  const [f, setF] = useUrlState({ from: p0.from, to: p0.to });
+  const [f, setF] = useUrlState({ from: p0.from, to: p0.to, funil: '' });
   const isMonth = f.from === p0.from && f.to === p0.to;
-  const q = useQuery({ queryKey: ['home', f.from, f.to], queryFn: () => api<HomeData>(`/home${qs({ from: f.from, to: f.to })}`), placeholderData: (x) => x });
+  const q = useQuery({ queryKey: ['home', f.from, f.to, f.funil], queryFn: () => api<HomeData>(`/home${qs({ from: f.from, to: f.to, pipelineId: f.funil || undefined })}`), placeholderData: (x) => x });
   const done = useMutation({
     mutationFn: (a: HomeData['agenda'][number]) => api(`/activities/${a.id}`, { method: 'PATCH', body: { completed: !a.completedAt, rowVersion: a.rowVersion } }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['home'] }); qc.invalidateQueries({ queryKey: ['activities'] }); },
@@ -256,10 +258,19 @@ export function HomePage() {
             {/* funil */}
             <section className="card p-5" aria-labelledby="h-pipe">
               <div className="mb-3 flex items-center justify-between">
-                <h2 id="h-pipe" className="flex items-center gap-2 whitespace-nowrap text-md font-bold text-ink"><BarChart3 className="h-5 w-5" />Funil · {d?.pipelineName ?? 'oportunidades'}</h2>
+                <h2 id="h-pipe" className="flex min-w-0 items-center gap-2 text-md font-bold text-ink"><BarChart3 className="h-5 w-5 shrink-0" />Funil
+                  {d?.pipelines && d.pipelines.length > 1
+                    ? <select aria-label="Funil" className="min-w-0 border border-line bg-surface px-2 py-1 text-sm font-semibold text-ink" value={d.pipelineId} onChange={(e) => setF({ funil: e.target.value })}>{d.pipelines.map((pl) => <option key={pl.id} value={pl.id}>{pl.name} ({pl.open})</option>)}</select>
+                    : <span className="truncate">· {d?.pipelineName ?? 'oportunidades'}</span>}
+                </h2>
                 <Link to="/opportunities" className="inline-flex items-center gap-1 whitespace-nowrap text-sm font-semibold text-primary hover:underline">Ver pipeline <ArrowRight className="h-4 w-4" /></Link>
               </div>
               {!d ? <LoadingRows rows={5} /> : <Funnel stages={d.pipeline} />}
+              {d?.pipelines && d.pipelines.length > 1 && (() => {
+                const here = d.pipeline.reduce((t, x) => t + x.count, 0);
+                const others = d.pipelines.filter((pl) => pl.id !== d.pipelineId && pl.open > 0);
+                return others.length ? <p className="mt-3 text-xs text-muted">Este funil: <b className="num text-ink">{here}</b> abertas. Também abertas em {others.map((pl) => `${pl.name} (${pl.open})`).join(', ')}. O card “Oportunidades abertas” soma todos os funis.</p> : null;
+              })()}
             </section>
           </div>
         </div>

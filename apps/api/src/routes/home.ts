@@ -1,5 +1,5 @@
 import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
-import { resolvePipeline } from '../services/instructions';
+import { pipelinesOf, resolvePipeline } from '../services/instructions';
 import { z } from 'zod';
 import { defineRoute } from '../http/route';
 import { periodBounds } from '../services/period';
@@ -19,7 +19,7 @@ export const homeRoutes = [
     summary: 'Início: indicadores, meta do mês, agenda de hoje, pipeline e oportunidades recentes',
     tag: 'Início',
     module: 'inicio',
-    query: z.object({ from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() }),
+    query: z.object({ from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(), pipelineId: z.string().uuid().optional() }),
     handler: async ({ app, auth, query }) => {
       const tz = auth.timezone;
       // período escolhido no Início; padrão: do dia 1 do mês até hoje (no fuso da empresa)
@@ -35,7 +35,7 @@ export const homeRoutes = [
 
       await ensureFreshEvents(app.db, auth.tenantId);
       const strategy = await strategicContribution(app.db, auth, todayStr);
-      const pipe = await resolvePipeline(app.db, auth.tenantId, { userId: auth.userId, total: level(auth, 'oportunidades') === 'total' });
+      const pipe = await resolvePipeline(app.db, auth.tenantId, { userId: auth.userId, total: level(auth, 'oportunidades') === 'total', pipelineId: query.pipelineId });
       const [oppK, actK, month, goals, agenda, pipeline, recent] = await Promise.all([
         // o período vale para tudo: situação no fim do período escolhido (no período que termina hoje, é a situação de agora)
         opportunityKpis(app.db, auth, 'inicio', { end: p.to, prevEnd: p.prevTo, past: to < todayStr }),
@@ -64,13 +64,13 @@ export const homeRoutes = [
           .where(and(eq(s.activities.tenantId, auth.tenantId), isNull(s.activities.deletedAt), eq(s.activities.ownerId, auth.userId), sql`${localDay} = ${today}`))
           .orderBy(asc(s.activities.dueAt))
           .limit(5),
+        // funil: abertas criadas até o fim do período (num período passado, também as que estavam abertas nele), por jornada e etapa
         app.db
-          .select({ stage: s.opportunities.stage, n: sql<number>`count(*)::int`, value: sql<number>`coalesce(sum(${s.opportunities.valueCents}),0)::bigint` })
+          .select({ pipelineId: s.opportunities.pipelineId, stage: s.opportunities.stage, n: sql<number>`count(*)::int`, value: sql<number>`coalesce(sum(${s.opportunities.valueCents}),0)::bigint` })
           .from(s.opportunities)
-          // funil: abertas criadas até o fim do período (num período passado, também as que estavam abertas nele)
-          .where(and(oppScope, eq(s.opportunities.pipelineId, pipe.id), sql`${s.opportunities.createdAt} < ${p.to}`,
+          .where(and(oppScope, sql`${s.opportunities.createdAt} < ${p.to}`,
             to < todayStr ? sql`(coalesce(${s.opportunities.wonAt}, ${s.opportunities.lostAt}, 'infinity') >= ${p.to} or ${s.opportunities.stage} not in ('ganha','perdida'))` : sql`${s.opportunities.stage} not in ('ganha','perdida')`))
-          .groupBy(s.opportunities.stage),
+          .groupBy(s.opportunities.pipelineId, s.opportunities.stage),
         // recentes: movimentadas no período
         opportunityQuery(app.db).where(and(oppScope, sql`${s.opportunities.createdAt} < ${p.to}`, sql`${s.opportunities.updatedAt} >= ${p.from}`)).orderBy(desc(s.opportunities.updatedAt)).limit(5),
       ]);
@@ -98,10 +98,21 @@ export const homeRoutes = [
         ],
         agenda: agenda.map((x) => ({ ...x, overdue: !x.completedAt && !!x.dueAt && x.dueAt < new Date() })),
         pipelineName: pipe.name,
-        pipeline: pipe.stages.filter((st) => st.kind === 'open').map((st) => {
-          const row = pipeline.find((p) => p.stage === st.key);
-          return { stage: st.key, name: st.name, color: st.color, count: row?.n ?? 0, valueCents: Number(row?.value ?? 0) };
-        }),
+        pipelineId: pipe.id,
+        pipeline: (() => {
+          const mine = pipeline.filter((r) => r.pipelineId === pipe.id);
+          const open = pipe.stages.filter((st) => st.kind === 'open');
+          const rows = open.map((st) => {
+            const row = mine.find((r) => r.stage === st.key);
+            return { stage: st.key, name: st.name, color: st.color, count: row?.n ?? 0, valueCents: Number(row?.value ?? 0) };
+          });
+          // abertas numa etapa que a jornada não tem mais (etapa renomeada/removida): aparecem juntas, para o total bater com o card
+          const orphan = mine.filter((r) => !open.some((st) => st.key === r.stage));
+          if (orphan.length) rows.push({ stage: '_outras', name: 'Outras etapas', color: null, count: orphan.reduce((t, r) => t + r.n, 0), valueCents: orphan.reduce((t, r) => t + Number(r.value), 0) });
+          return rows;
+        })(),
+        // abertas em cada jornada (o card "Oportunidades abertas" soma todas; o funil mostra uma por vez)
+        pipelines: (await pipelinesOf(app.db, auth.tenantId)).map((pl) => ({ id: pl.id, name: pl.name, open: pipeline.filter((r) => r.pipelineId === pl.id).reduce((t, r) => t + r.n, 0) })).filter((pl) => pl.open > 0 || pl.id === pipe.id),
         recent: recent.map((o) => opportunityDto(o)),
         today: new Date().toISOString(),
         period: { from, to },
