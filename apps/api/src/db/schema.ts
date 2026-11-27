@@ -2388,6 +2388,18 @@ export const negotiationMessages = pgTable(
 );
 
 /** Até onde cada pessoa leu o chat e os comentários de cada negociação (não lidas e menções). */
+/** "Limpar" do sino e das menções: o que aconteceu até esse instante some do painel (cada pessoa, cada painel). */
+export const userFeedClears = pgTable(
+  'user_feed_clears',
+  {
+    tenantId: tenantId(),
+    userId: uuid('user_id').notNull().references(() => users.id),
+    scope: text('scope').notNull(),
+    clearedAt: ts('cleared_at').notNull().defaultNow(),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.userId, t.scope] }), scopeCk: check('user_feed_clears_scope_ck', inList('scope', ['sino', 'mencoes'])) }),
+);
+
 export const negotiationReads = pgTable(
   'negotiation_reads',
   {

@@ -112,7 +112,8 @@ export async function unreadOf(db: DbOrTx, auth: AuthContext, oppId: string) {
 }
 
 /** Menções a mim ainda não lidas, em todas as negociações. */
-export async function myMentions(db: DbOrTx, auth: AuthContext) {
+/** `since`: o que aconteceu até esse instante foi limpo pela pessoa naquele painel e não volta. */
+export async function myMentions(db: DbOrTx, auth: AuthContext, since?: Date | null) {
   const rows = await db.execute<{ opportunity_id: string; code: number; contact_name: string; source: string; body: string; author: string | null; at: Date; unread: boolean }>(sql`
     with m as (
       select nm.opportunity_id, 'chat' as source, nm.body, nm.author_id, nm.created_at as at
@@ -188,7 +189,7 @@ export async function myMentions(db: DbOrTx, auth: AuthContext) {
   // avisos genéricos (Pessoas & Cultura e, no futuro, outros módulos)
   const un = await myPeopleNotifications(db, auth.tenantId, auth.userId, 30, true); // só marcação para mim e comunicação institucional
   const unItems = un.map((r) => ({ kind: 'aviso' as const, opportunityId: null as string | null, taskId: r.id, code: null as number | null, contactName: r.link as string | null, title: r.title as string | null, source: `pessoas_${r.event}` as (typeof opp)[number]['source'], body: r.body ?? '', author: r.author, at: r.at, unread: !r.readAt }));
-  const items = [...opp, ...tk, ...iv, ...gvItems, ...unItems].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime()).slice(0, 40);
+  const items = [...opp, ...tk, ...iv, ...gvItems, ...unItems].filter((i) => !since || new Date(i.at).getTime() > since.getTime()).sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime()).slice(0, 40);
   return { items, unread: items.filter((i) => i.unread).length };
 }
 

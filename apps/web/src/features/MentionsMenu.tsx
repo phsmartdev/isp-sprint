@@ -2,7 +2,7 @@
 import { plainText } from './RichText';
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { AtSign, Bell } from 'lucide-react';
 import { api } from '../lib/api';
@@ -59,7 +59,20 @@ function ItemBody({ m }: { m: Mention }) {
   );
 }
 
-const useFeed = () => useQuery({ queryKey: ['mentions'], queryFn: () => api<{ items: Mention[]; unread: number }>('/me/mentions'), refetchInterval: 60_000 });
+type Scope = 'sino' | 'mencoes';
+const useFeed = (scope: Scope) => useQuery({ queryKey: ['mentions', scope], queryFn: () => api<{ items: Mention[]; unread: number }>(`/me/mentions?scope=${scope}`), refetchInterval: 60_000 });
+/** "Limpar": o que está no painel agora some (o que chegar depois aparece). */
+function useClear(scope: Scope, refetch: () => unknown) {
+  return useMutation({ mutationFn: () => api(`/me/notificacoes/limpar`, { method: 'POST', body: { scope } }), onSuccess: () => refetch() });
+}
+function PanelHeader({ title, count, clear }: { title: string; count: number; clear: ReturnType<typeof useClear> }) {
+  return (
+    <div className="flex items-center justify-between border-b border-line px-4 py-2">
+      <p className="text-sm font-bold text-ink">{title}</p>
+      {count > 0 && <button type="button" className="text-sm font-semibold text-primary hover:underline disabled:opacity-50" disabled={clear.isPending} onClick={() => clear.mutate()}>Limpar</button>}
+    </div>
+  );
+}
 function usePopover() {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -87,7 +100,8 @@ function FeedList({ items, onPick, empty }: { items: Mention[]; onPick: (m: Ment
 }
 
 export function MentionsMenu() {
-  const q = useFeed();
+  const q = useFeed('mencoes');
+  const clear = useClear('mencoes', q.refetch);
   const { open, setOpen, ref } = usePopover();
   const n = q.data?.unread ?? 0;
   const pick = (m: Mention) => { setOpen(false); if (m.kind === 'aviso' && m.unread) void api(`/me/notificacoes/${m.taskId}/lida`, { method: 'POST' }).then(() => q.refetch()); };
@@ -99,7 +113,7 @@ export function MentionsMenu() {
       </button>
       {open && (
         <div role="dialog" aria-label="Menções" className="absolute right-0 top-full z-40 mt-2 w-[360px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-line bg-surface shadow-overlay">
-          <p className="border-b border-line px-4 py-2.5 text-sm font-bold text-ink">Menções</p>
+          <PanelHeader title="Menções" count={q.data?.items.length ?? 0} clear={clear} />
           <FeedList items={q.data?.items ?? []} onPick={pick} empty="Nada por aqui. Menções (@) em negociações, tarefas e Pessoas & Gestão, tarefas pedidas a você, entregas para aprovar e intervenções da Gestão de Times aparecem aqui." />
         </div>
       )}
@@ -113,7 +127,8 @@ export function MentionsMenu() {
  * aparecem como uma linha a mais, só para quem tem o módulo de Atividades.
  */
 export function NotificationsMenu({ activities }: { activities: { due: number } | null }) {
-  const q = useFeed();
+  const q = useFeed('sino');
+  const clear = useClear('sino', q.refetch);
   const { open, setOpen, ref } = usePopover();
   const n = q.data?.unread ?? 0;
   const due = activities?.due ?? 0;
@@ -128,7 +143,7 @@ export function NotificationsMenu({ activities }: { activities: { due: number } 
       </button>
       {open && (
         <div role="dialog" aria-label="Notificações" className="absolute right-0 top-full z-40 mt-2 w-[380px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-line bg-surface shadow-overlay">
-          <p className="border-b border-line px-4 py-2.5 text-sm font-bold text-ink">Notificações</p>
+          <PanelHeader title="Notificações" count={q.data?.items.length ?? 0} clear={clear} />
           {activities && due > 0 && <Link to="/activities" onClick={() => setOpen(false)} className="block border-b border-line bg-surface-2 px-4 py-2.5 text-sm font-semibold text-ink hover:bg-primary-soft">{due === 1 ? '1 atividade para hoje ou vencida' : `${due} atividades para hoje ou vencidas`}</Link>}
           <FeedList items={q.data?.items ?? []} onPick={pick} empty="Nada novo. Trilhas atribuídas a você, aprovações, tarefas, menções e avisos aparecem aqui." />
         </div>
