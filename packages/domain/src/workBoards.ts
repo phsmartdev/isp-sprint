@@ -72,3 +72,71 @@ export function boardOfTask(t: { boardKey?: string | null; ownerTeamIds: string[
   for (const b of boards) if (b.teamIds.some((id) => t.ownerTeamIds.includes(id))) return b.key;
   return null;
 }
+
+// ------------------------------------------------------------------ capacidade semanal (Etapa 5)
+
+/** Jornada por dia da semana, em minutos (1 = segunda … 7 = domingo). Sem jornada cadastrada, não há capacidade (não se presume). */
+export type WeekSchedule = Partial<Record<1 | 2 | 3 | 4 | 5 | 6 | 7, number>>;
+export const ABSENCE_KINDS = ['ausencia', 'afastamento', 'compromisso_fixo', 'reserva_operacional'] as const;
+export type AbsenceKind = (typeof ABSENCE_KINDS)[number];
+export const ABSENCE_KIND_LABELS: Record<AbsenceKind, string> = { ausencia: 'Ausência', afastamento: 'Afastamento', compromisso_fixo: 'Compromisso fixo', reserva_operacional: 'Rotina operacional (fora das tarefas)' };
+
+export type CapacityInput = {
+  weekStart: string;
+  schedule: WeekSchedule | null;
+  holidays: string[];
+  /** férias programadas: início e quantidade de dias corridos */
+  vacations: { startDate: string; days: number }[];
+  /** ausências, afastamentos, compromissos fixos e rotinas: dia todo (minutesPerDay vazio) ou X minutos por dia útil */
+  absences: { startOn: string; endOn: string; minutesPerDay: number | null }[];
+  /** parte da pessoa neste departamento (bp; 10000 = toda) */
+  allocationBp: number;
+};
+export type CapacityResult = { grossMinutes: number; unavailableMinutes: number; netMinutes: number; days: { day: string; minutes: number; reason: string | null }[] } | null;
+
+const addDaysIso = (iso: string, n: number) => { const d = new Date(`${iso}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+
+/**
+ * Capacidade líquida da pessoa na semana = jornada dos dias − feriados − férias − ausências − reservas, vezes a parte
+ * dela no departamento. Rotinas que já são tarefas não entram aqui (seriam deduzidas duas vezes).
+ */
+export function weekCapacity(i: CapacityInput): CapacityResult {
+  if (!i.schedule || !Object.values(i.schedule).some((m) => (m ?? 0) > 0)) return null;
+  const days: { day: string; minutes: number; reason: string | null }[] = [];
+  let gross = 0, unavailable = 0;
+  for (let n = 0; n < 7; n++) {
+    const day = addDaysIso(i.weekStart, n);
+    const base = i.schedule[(n + 1) as 1] ?? 0;
+    if (!base) continue;
+    gross += base;
+    let lost = 0; let reason: string | null = null;
+    if (i.holidays.includes(day)) { lost = base; reason = 'feriado'; }
+    else if (i.vacations.some((v) => day >= v.startDate && day <= addDaysIso(v.startDate, v.days - 1))) { lost = base; reason = 'férias'; }
+    else {
+      for (const a of i.absences) if (day >= a.startOn && day <= a.endOn) { lost += a.minutesPerDay == null ? base : a.minutesPerDay; reason = a.minutesPerDay == null ? 'ausência' : reason ?? 'reserva'; }
+      lost = Math.min(lost, base);
+    }
+    unavailable += lost;
+    days.push({ day, minutes: base - lost, reason });
+  }
+  const share = Math.max(0, Math.min(10_000, i.allocationBp)) / 10_000;
+  return { grossMinutes: Math.round(gross * share), unavailableMinutes: Math.round(unavailable * share), netMinutes: Math.round((gross - unavailable) * share), days };
+}
+
+/** Meta de cada categoria (minutos) a partir da capacidade líquida do departamento e da diretriz. */
+export function categoryTargets(netMinutes: number, policy: Record<CapacityCategory, number>): Record<CapacityCategory, number> {
+  return { comercial: Math.round((netMinutes * policy.comercial) / 10_000), interno: Math.round((netMinutes * policy.interno) / 10_000), hipotese: Math.round((netMinutes * policy.hipotese) / 10_000) };
+}
+
+/** Pendências para comprometer a tarefa na Sprint: responsável, categoria e esforço estimado. */
+export function commitIssues(t: { ownerId: string | null; category: CapacityCategory | null; estimateMinutes: number | null }): string[] {
+  const out: string[] = [];
+  if (!t.ownerId) out.push('sem responsável');
+  if (!t.category) out.push('sem categoria');
+  if (!t.estimateMinutes) out.push('sem esforço estimado');
+  return out;
+}
+
+export const SPRINT_STATUSES = ['planejamento', 'andamento', 'encerrada', 'cancelada'] as const;
+export type SprintStatus = (typeof SPRINT_STATUSES)[number];
+export const SPRINT_STATUS_LABELS: Record<SprintStatus, string> = { planejamento: 'Em planejamento', andamento: 'Em andamento', encerrada: 'Encerrada', cancelada: 'Cancelada' };

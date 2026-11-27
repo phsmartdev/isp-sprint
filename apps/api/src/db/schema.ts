@@ -912,6 +912,100 @@ export const taskBoards = pgTable('task_boards', {
   updatedAt: ts('updated_at').notNull().defaultNow(),
 }, (t) => ({ uq: uniqueIndex('task_boards_uq').on(t.tenantId, t.key), keyCk: check('task_boards_key_ck', sql`key in ('comercial','sucesso_cliente','produto','marketing')`) }));
 
+/** Jornada de trabalho da pessoa (minutos por dia da semana) e a parte dela em cada departamento; vale a partir de uma data. */
+export const workSchedules = pgTable('work_schedules', {
+  id: id(),
+  tenantId: tenantId(),
+  userId: uuid('user_id').notNull().references(() => users.id),
+  validFrom: date('valid_from', { mode: 'string' }).notNull(),
+  minutesByWeekday: jsonb('minutes_by_weekday').$type<Record<string, number>>().notNull(),
+  /** parte em cada quadro (bp); vazio = dividida igualmente entre os quadros das equipes da pessoa */
+  allocations: jsonb('allocations').$type<Record<string, number>>().notNull().default(sql`'{}'::jsonb`),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({ idx: index('work_schedules_idx').on(t.tenantId, t.userId, t.validFrom) }));
+
+/** Feriados da empresa (saem da capacidade de todos). */
+export const companyHolidays = pgTable('company_holidays', {
+  id: id(),
+  tenantId: tenantId(),
+  day: date('day', { mode: 'string' }).notNull(),
+  name: text('name').notNull(),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({ uq: uniqueIndex('company_holidays_uq').on(t.tenantId, t.day) }));
+
+/** Ausências, afastamentos, compromissos fixos e rotinas fora das tarefas: dia todo ou minutos por dia. */
+export const workAbsences = pgTable('work_absences', {
+  id: id(),
+  tenantId: tenantId(),
+  userId: uuid('user_id').notNull().references(() => users.id),
+  kind: text('kind').notNull(),
+  startOn: date('start_on', { mode: 'string' }).notNull(),
+  endOn: date('end_on', { mode: 'string' }).notNull(),
+  minutesPerDay: integer('minutes_per_day'),
+  note: text('note'),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+  deletedAt: ts('deleted_at'),
+}, (t) => ({ idx: index('work_absences_idx').on(t.tenantId, t.userId, t.startOn), kindCk: check('work_absences_kind_ck', sql`kind in ('ausencia','afastamento','compromisso_fixo','reserva_operacional')`), rangeCk: check('work_absences_range_ck', sql`end_on >= start_on`) }));
+
+/**
+ * Sprint semanal do departamento. Ao abrir, grava a fotografia imutável do planejamento original (tarefas, responsáveis,
+ * esforço, prazos, capacidade e diretriz). Revisões ficam em work_sprint_events; o encerramento guarda o comparativo.
+ */
+export const workSprints = pgTable('work_sprints', {
+  id: id(),
+  tenantId: tenantId(),
+  boardKey: text('board_key').notNull(),
+  weekStart: date('week_start', { mode: 'string' }).notNull(),
+  status: text('status').notNull().default('planejamento'),
+  objective: text('objective'),
+  policy: jsonb('policy').$type<Record<string, number>>(),
+  snapshot: jsonb('snapshot').$type<Record<string, unknown>>(),
+  closing: jsonb('closing').$type<Record<string, unknown>>(),
+  openedAt: ts('opened_at'),
+  openedBy: uuid('opened_by').references(() => users.id),
+  closedAt: ts('closed_at'),
+  closedBy: uuid('closed_by').references(() => users.id),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({
+  uq: uniqueIndex('work_sprints_week_uq').on(t.tenantId, t.boardKey, t.weekStart).where(sql`status <> 'cancelada'`),
+  statusCk: check('work_sprints_status_ck', sql`status in ('planejamento','andamento','encerrada','cancelada')`),
+}));
+
+/** Tarefas comprometidas na Sprint (plano original ou fura-fila); retirada não apaga: marca quando, quem e por quê. */
+export const workSprintItems = pgTable('work_sprint_items', {
+  id: id(),
+  tenantId: tenantId(),
+  sprintId: uuid('sprint_id').notNull().references(() => workSprints.id),
+  activityId: uuid('activity_id').notNull().references(() => activities.id),
+  entry: text('entry').notNull().default('plano'),
+  committedMinutes: integer('committed_minutes').notNull(),
+  category: text('category').notNull(),
+  ownerId: uuid('owner_id').notNull().references(() => users.id),
+  dueAt: ts('due_at'),
+  position: integer('position').notNull().default(0),
+  addedAt: createdAt(),
+  addedBy: uuid('added_by').references(() => users.id),
+  removedAt: ts('removed_at'),
+  removedBy: uuid('removed_by').references(() => users.id),
+  removedReason: text('removed_reason'),
+}, (t) => ({ uq: uniqueIndex('work_sprint_items_uq').on(t.sprintId, t.activityId).where(sql`removed_at is null`), entryCk: check('work_sprint_items_entry_ck', sql`entry in ('plano','fura_fila')`) }));
+
+/** Histórico da Sprint (append-only): abertura, revisões do plano, retiradas, fura-filas, encerramento. */
+export const workSprintEvents = pgTable('work_sprint_events', {
+  id: id(),
+  tenantId: tenantId(),
+  sprintId: uuid('sprint_id').notNull().references(() => workSprints.id),
+  type: text('type').notNull(),
+  payload: jsonb('payload').$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+  reason: text('reason'),
+  actorId: uuid('actor_id').references(() => users.id),
+  createdAt: createdAt(),
+}, (t) => ({ idx: index('work_sprint_events_idx').on(t.sprintId, t.createdAt) }));
+
 /** Diretriz de capacidade (70/20/10) por quadro, versionada: planejamento encerrado guarda a versão que valia. */
 export const capacityPolicies = pgTable('capacity_policies', {
   id: id(),

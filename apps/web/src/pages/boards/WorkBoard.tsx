@@ -21,6 +21,7 @@ import { Avatar, EmptyState, ErrorState, Input, LoadingRows, Select } from '../.
 import { useToast } from '../../components/ui/overlay';
 import { errMsg } from '../../features/contracts/shared';
 import { TaskDrawer } from '../../features/tasks/TaskDrawer';
+import { SprintBar } from '../../features/boards/SprintPlanner';
 
 type Item = {
   id: string; ref: string; title: string; type: string; status: string; column: BoardColumn; rowVersion: number; ownerId: string; ownerName: string | null; priority: string;
@@ -69,6 +70,7 @@ export function WorkBoardPage() {
       {q.isError ? <ErrorState error={q.error} onRetry={() => q.refetch()} /> : !d ? <LoadingRows rows={6} /> : (
         <>
           {d.board.teamIds.length === 0 && <p className="border-l-4 border-l-[#B45309] bg-[#FFF7E6] px-3 py-2 text-sm text-ink">Este quadro ainda não tem equipes. A gestão do departamento ou o administrador define as equipes em Configurações → Quadros de Tarefas; até lá aparecem só as tarefas enviadas para cá.</p>}
+          {key !== 'marketing' && <SprintBar board={key} week={d.week} />}
           <Indicators d={d} onFilter={(p) => setU(p)} />
           <div className="flex flex-wrap items-center gap-2">
             <div role="radiogroup" aria-label="Visão" className="inline-flex flex-wrap border border-line">

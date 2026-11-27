@@ -73,20 +73,20 @@ export async function assertBoardManagement(db: DbOrTx, auth: AuthContext, t: { 
   if (role === 'colaborador') throw forbidden(`Esta tarefa foi enviada para ${BOARD_LABELS[board]}: quem planeja, distribui e muda o prazo é a liderança desse time.`);
 }
 
-function assertBoardOpen(auth: AuthContext, board: BoardKey) {
+export function assertBoardOpen(auth: AuthContext, board: BoardKey) {
   assertModuleOpen(auth, board === 'marketing' ? 'campanhas' : 'atividades', BOARD_FEATURE[board]);
   if (level(auth, 'atividades') === 'nenhum') throw forbidden('Seu perfil não tem acesso a tarefas.');
 }
 
 /** Equipes de cada pessoa (para achar o quadro da tarefa pelo responsável). */
-async function teamsByUser(db: DbOrTx, tenantId: string) {
+export async function teamsByUser(db: DbOrTx, tenantId: string) {
   const rows = await db.select({ userId: s.teamMemberships.userId, teamId: s.teamMemberships.teamId }).from(s.teamMemberships).innerJoin(s.teams, eq(s.teams.id, s.teamMemberships.teamId)).where(and(eq(s.teams.tenantId, tenantId), isNull(s.teams.deletedAt)));
   const m = new Map<string, string[]>();
   for (const r of rows) m.set(r.userId, [...(m.get(r.userId) ?? []), r.teamId]);
   return m;
 }
 
-const ymd = (d: Date, tz: string) => new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+export const ymd = (d: Date, tz: string) => new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
 
 export const workBoardRoutes = [
   defineRoute({
