@@ -14,7 +14,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { runAbmDaily } from '../services/abmFollowup';
 import { and, desc, eq, max, ne, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { diffInstruction, InstructionUpload, NotificationUpdate, parseInstruction, SmtpTest, SmtpUpdate, type Instruction } from '@isp/shared';
+import { ACCESS_EMAIL_BODIES, defaultInstruction, diffInstruction, EMAIL_TEMPLATE_KEYS, EMAIL_TEMPLATE_LABELS, EMAIL_VARIABLES, EmailTemplateSchema, emailTemplateOf, InstructionUpload, renderTemplate, type EmailTemplateKey, NotificationUpdate, parseInstruction, SmtpTest, SmtpUpdate, type Instruction } from '@isp/shared';
 import { defineRoute, IdParams } from '../http/route';
 import { notFound, unauthorized, unprocessable, AppError } from '../http/errors';
 import * as s from '../db/schema';
@@ -24,7 +24,9 @@ import { closeDueGoals, rollRecurringGoals } from '../services/indicators';
 import { syncInterventions } from '../services/interventions';
 import { applyJourneys, exportable, getActiveInstruction, journeyBlockers, pipelinesOf } from '../services/instructions';
 import { encryptSecret, notificationsOf, sendEmail, smtpConfig } from '../services/email';
-import { sendActivityDigests } from '../services/alerts';
+import { publicLink, sendActivityDigests } from '../services/alerts';
+import { accessEmailHtml } from '../services/accessEmail';
+import { signatureHtml, signatureOf } from '../services/mailSignature';
 import { runIdleAutomations } from '../services/automations';
 import { runContractAlerts } from '../services/contractAlerts';
 import { runContractTaskNotices } from '../services/contractNotify';
@@ -138,6 +140,77 @@ export const settingsRoutes = [
       });
       await audit(app.db, req, { action: 'instruction.activate', entityType: 'instruction', entityId: String(result.version), metadata: { version: result.version } });
       return { ok: true, version: result.version };
+    },
+  }),
+
+  // ------------------------------------------------------------------ modelos de e-mail do sistema (edição na tela)
+  defineRoute({
+    method: 'GET',
+    url: '/admin/email-templates',
+    summary: 'Modelos de e-mail do sistema (assunto e texto), com as variáveis de cada um e o texto padrão',
+    tag: 'Modelo de instrução',
+    ...ADMIN,
+    handler: async ({ app, auth }) => {
+      const active = await getActiveInstruction(app.db, auth.tenantId);
+      const def = defaultInstruction();
+      return {
+        version: active.version,
+        items: EMAIL_TEMPLATE_KEYS.map((key) => ({ key, label: EMAIL_TEMPLATE_LABELS[key], ...emailTemplateOf(active.content, key), variables: EMAIL_VARIABLES[key], default: def.emails.modelos[key], accessBox: key in ACCESS_EMAIL_BODIES })),
+      };
+    },
+  }),
+
+  defineRoute({
+    method: 'PUT',
+    url: '/admin/email-templates/:key',
+    summary: 'Salva um modelo de e-mail: gera e ativa uma nova versão do modelo de instrução só com essa mudança (a anterior fica no histórico)',
+    tag: 'Modelo de instrução',
+    ...ADMIN,
+    params: z.object({ key: z.enum(EMAIL_TEMPLATE_KEYS) }),
+    body: EmailTemplateSchema,
+    handler: async ({ app, auth, params, body, req }) => {
+      const result = await app.db.transaction(async (tx) => {
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${'instr:' + auth.tenantId}))`);
+        const active = await getActiveInstruction(tx, auth.tenantId);
+        const next = { ...active.content, emails: { modelos: { ...active.content.emails.modelos, [params.key]: { assunto: body.assunto, corpo: body.corpo } } } };
+        const parsed = parseInstruction(next);
+        if (!parsed.ok) throw unprocessable(parsed.issues[0]?.message ?? 'Modelo inválido.', parsed.issues.slice(0, 20));
+        const changes = diffInstruction(active.content, parsed.value);
+        if (!changes.length) return { version: active.version, changed: false };
+        const [m] = await tx.select({ v: max(s.businessInstructions.version) }).from(s.businessInstructions).where(eq(s.businessInstructions.tenantId, auth.tenantId));
+        await tx.update(s.businessInstructions).set({ status: 'arquivada' }).where(and(eq(s.businessInstructions.tenantId, auth.tenantId), eq(s.businessInstructions.status, 'ativa')));
+        const [r] = await tx.insert(s.businessInstructions)
+          .values({ tenantId: auth.tenantId, version: (m?.v ?? 0) + 1, status: 'ativa', content: { ...parsed.value, _leia_me: undefined, versao: undefined }, changes, notes: `Modelo de e-mail “${EMAIL_TEMPLATE_LABELS[params.key]}” editado na tela`, createdBy: auth.userId, activatedAt: new Date(), activatedBy: auth.userId })
+          .returning({ version: s.businessInstructions.version });
+        return { version: r!.version, changed: true };
+      });
+      await audit(app.db, req, { action: 'email_template.update', entityType: 'instruction', entityId: String(result.version), metadata: { key: params.key, ...result } });
+      return { ok: true, ...result };
+    },
+  }),
+
+  defineRoute({
+    method: 'POST',
+    url: '/admin/email-templates/:key/preview',
+    summary: 'Pré-visualiza um modelo de e-mail com dados fictícios (nada é enviado)',
+    tag: 'Modelo de instrução',
+    ...ADMIN,
+    params: z.object({ key: z.enum(EMAIL_TEMPLATE_KEYS) }),
+    body: EmailTemplateSchema,
+    handler: async ({ app, auth, params, body }) => {
+      const loginUrl = publicLink(app.config, '/login'), wikiUrl = publicLink(app.config, '/playbooks');
+      const [t] = await app.db.select({ name: s.tenants.name }).from(s.tenants).where(eq(s.tenants.id, auth.tenantId)).limit(1);
+      const sample: Record<string, string> = {
+        'usuario.nome': 'Maria Exemplo', 'usuario.email': 'maria.exemplo@empresa.example', senha_temporaria: 'Exemplo-1234', link: loginUrl, link_wiki: wikiUrl, 'empresa.nome': t?.name ?? 'Empresa',
+        'cliente.nome': 'Cliente Exemplo', 'vendedor.nome': auth.name, 'vendedor.email': 'vendedor@empresa.example', 'plano.nome': 'Plano Exemplo 500 Mega', 'plano.valor': 'R$ 99,90',
+        quantidade: '3', lista: '• Ligar para Cliente Exemplo (hoje, 10:00)\n• Enviar proposta (vencida)', 'lead.nome': 'Lead Exemplo', 'lead.telefone': '79 90000-0000', atribuido_por: auth.name,
+      };
+      const subject = renderTemplate(body.assunto, sample), text = renderTemplate(body.corpo, sample);
+      if (!(params.key in ACCESS_EMAIL_BODIES)) return { subject, text, html: null };
+      const sig = await signatureOf(app.db, auth.userId);
+      const sigImg = sig.image ? `<img src="data:${sig.image.mime};base64,${sig.image.data.toString('base64')}" width="${sig.image.width}" alt="Assinatura" style="display:block;border:0;max-width:100%">` : '';
+      const html = accessEmailHtml({ kind: params.key as Extract<EmailTemplateKey, 'convite_usuario' | 'nova_senha'>, name: sample['usuario.nome']!, email: sample['usuario.email']!, password: sample.senha_temporaria!, loginUrl, wikiUrl, logoUrl: publicLink(app.config, '/brand/bkt-logo.png'), company: sample['empresa.nome']!, message: text, signatureHtml: sigImg || signatureHtml({ ...sig, image: null }) || undefined });
+      return { subject, text, html };
     },
   }),
 
