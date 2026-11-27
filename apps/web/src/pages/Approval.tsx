@@ -163,7 +163,7 @@ function RequestDialog({ a, onClose }: { a: Analysis; onClose: () => void }) {
     proposed: dec(base?.proposedMonthlyCents ?? a.terms.proposedMonthlyCents ?? a.terms.listMonthlyCents),
     activation: dec(base?.activationFeeCents ?? a.terms.activationFeeCents),
     replaces: dec(base?.replacesMonthlyCents ?? 0),
-    termMonths: base?.termMonths ? String(base.termMonths) : '',
+    termMonths: base?.termMonths ? String(base.termMonths) : a.terms.termMonths ? String(a.terms.termMonths) : '',
     conditions: base?.conditions ?? '',
     justification: base?.status === 'correcao' ? '' : base?.justification ?? '',
     risks: base?.risks ?? '',

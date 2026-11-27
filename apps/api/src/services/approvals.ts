@@ -222,7 +222,8 @@ export async function buildAnalysis(db: DbOrTx, auth: AuthContext, opp: Opportun
   // condições da proposta (pedido existente ou o que está sendo montado)
   const base = pending ?? latest;
   const terms: Terms = {
-    proposedMonthlyCents: overrides.proposedMonthlyCents ?? base?.proposedMonthlyCents ?? opp.valueCents ?? null,
+    // valor zerado na oportunidade conta como não informado (o formulário não abre em R$ 0,00)
+    proposedMonthlyCents: overrides.proposedMonthlyCents ?? base?.proposedMonthlyCents ?? (opp.valueCents || null),
     activationFeeCents: overrides.activationFeeCents !== undefined ? overrides.activationFeeCents : base?.activationFeeCents ?? opp.activationFeeCents ?? null,
     replacesMonthlyCents: overrides.replacesMonthlyCents ?? base?.replacesMonthlyCents ?? 0,
     negotiationType: overrides.negotiationType ?? base?.negotiationType ?? (kind.kind === 'novo' ? 'novo_servico' : 'novo_servico'),
@@ -346,7 +347,8 @@ export async function buildAnalysis(db: DbOrTx, auth: AuthContext, opp: Opportun
       : null,
     identity: see.customer ? identity : null,
     classification: see.customer ? { current: cls, history: classHist.slice(0, 10), options: settings.classificationOptions } : null,
-    terms: { ...terms, listMonthlyCents: listMonthly, discountBp: discountBp(listMonthly, terms.proposedMonthlyCents), planName: planRow?.name ?? opp.planName },
+    // prazo do pedido anterior ou o da viabilidade salva (preenche o formulário do pedido)
+    terms: { ...terms, termMonths: base?.termMonths ?? (ectx.savedResult && ectx.input.termMonths ? ectx.input.termMonths : null), listMonthlyCents: listMonthly, discountBp: discountBp(listMonthly, terms.proposedMonthlyCents), planName: planRow?.name ?? opp.planName },
     economics: fin ? { mode: ectx.input.mode, verdict: fin.verdict, withinPolicy: fin.withinPolicy, missing: econMissing, initialCents: fin.initialCents, contributionCents: finKpi?.contributionCents ?? null, marginPct: finKpi?.marginPct ?? null, paybackMonths: finKpi?.paybackMonths ?? null, termMonths: fin.term.N } : null,
     projections: {
       revenue12mCents: proj(terms.proposedMonthlyCents, 12),

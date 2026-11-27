@@ -94,3 +94,26 @@ test('compliance de brindes: solicitar, avaliar, decidir, executar e prestar con
     await page.request.post('/api/v1/brindes/compliance/diretrizes', { data: { ruleKey: r.ruleKey, name: r.name, param: r.param, controlType: r.controlType, limitValue: r.limitValue, natures: r.natures, kitCategories: r.kitCategories, validFrom: '2020-01-01', active: false, changeNote: 'Encerrada ao fim do teste' } });
   }
 });
+
+test('solicitação com finalidade Oportunidade: o campo aparece com as oportunidades da conta', async ({ page }) => {
+  test.setTimeout(120_000);
+  const st = Date.now().toString(36);
+  await login(page, 'lucas@yepnet.test');
+  const lk = await (await page.request.get('/api/v1/meta/lookups')).json();
+  const o = await (await page.request.post('/api/v1/opportunities', { data: { newContact: { name: `Conta Brinde Opp ${st}`, segment: 'empresarial', phone: '79999993001' }, planId: lk.plans[0].id } })).json();
+  const opp = await (await page.request.get(`/api/v1/opportunities/${o.id}`)).json();
+  await page.goto('/brindes?t=compliance');
+  await page.getByRole('button', { name: 'Nova solicitação' }).click();
+  const form = page.getByRole('dialog', { name: 'Nova solicitação de concessão' });
+  await form.getByLabel('Finalidade').selectOption('oportunidade');
+  const field = form.getByLabel('Oportunidade');
+  await expect(field).toBeDisabled();
+  await form.getByLabel('Buscar conta').fill(`Conta Brinde Opp ${st}`);
+  await form.getByRole('button', { name: `Conta Brinde Opp ${st}` }).click();
+  await expect(field).toBeEnabled();
+  await field.selectOption({ label: `OP-${opp.code} · ${opp.title}` });
+  await form.getByLabel('Descrição').fill('Kit fictício para a negociação');
+  await form.getByLabel('Justificativa institucional ou comercial').fill('Apoio ao fechamento da oportunidade fictícia');
+  await form.getByRole('button', { name: 'Enviar para avaliação' }).click();
+  await expect(page.getByRole('dialog', { name: /GC-\d{4}-\d{4} · Kit fictício para a negociação/ })).toBeVisible();
+});

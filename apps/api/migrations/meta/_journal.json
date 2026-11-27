@@ -1317,6 +1317,13 @@
       "when": 1795789533527,
       "tag": "0187_limpar_notificacoes",
       "breakpoints": true
+    },
+    {
+      "idx": 188,
+      "version": "7",
+      "when": 1795790998703,
+      "tag": "0188_canais_entrada",
+      "breakpoints": true
     }
   ]
 }

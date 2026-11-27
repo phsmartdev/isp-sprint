@@ -17,6 +17,8 @@ import type { DbOrTx } from '../db/client';
 import * as s from '../db/schema';
 import { audit } from '../services/audit';
 import { todayIn } from '../services/vacations';
+import { oppVisibility } from '../services/opportunities';
+import { level } from '../services/scope';
 import { assertAccount } from './stakeholders';
 import {
   accountConcessions, allRules, concessionTrail, budgetAvailable, recipientsOf, detectedAttention, canConfigure, canReport, canSeeRequest, COMPLIANCE_EVENTS, profilesOf, decidersFor, evaluate, isComplete, levelsOf, notifyCompliance, pendenciesOf, seesAll, settingsOf,
@@ -248,6 +250,20 @@ export const giftComplianceRoutes = [
     },
   }),
 
+  defineRoute({
+    method: 'GET', url: '/brindes/compliance/destinos', summary: 'Para a finalidade da solicitação: campanhas ativas e as oportunidades (que a pessoa vê) das contas escolhidas', ...READ,
+    query: z.object({ contactIds: z.string().max(2000).optional() }),
+    handler: async ({ app, auth, query }) => {
+      const ids = (query.contactIds ?? '').split(',').map((x) => x.trim()).filter((x) => /^[0-9a-f-]{36}$/i.test(x)).slice(0, 20);
+      const campaigns = await app.db.select({ id: s.campaigns.id, name: s.campaigns.name }).from(s.campaigns).where(and(eq(s.campaigns.tenantId, auth.tenantId), eq(s.campaigns.active, true))).orderBy(asc(s.campaigns.name));
+      const opportunities = ids.length && level(auth, 'oportunidades') !== 'nenhum'
+        ? await app.db.select({ id: s.opportunities.id, title: s.opportunities.title, code: s.opportunities.code, contactId: s.opportunities.contactId, account: s.contacts.name })
+          .from(s.opportunities).innerJoin(s.contacts, eq(s.contacts.id, s.opportunities.contactId))
+          .where(and(inArray(s.opportunities.contactId, ids), oppVisibility(auth))).orderBy(desc(s.opportunities.createdAt)).limit(100)
+        : [];
+      return { campaigns, opportunities };
+    },
+  }),
   defineRoute({
     method: 'POST', url: '/brindes/compliance/solicitacoes', summary: 'Registra a solicitação: avalia as diretrizes vigentes e encaminha à alçada (restrição obrigatória fica impedida)', ...READ,
     body: RequestBody,
