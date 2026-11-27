@@ -36,6 +36,11 @@ export function AdminContractSettings() {
   const tpls = useQuery({ queryKey: ['admin', 'proposal-templates', 'contrato'], queryFn: () => api<{ items: { id: string; name: string }[] }>('/admin/proposal-templates?purpose=contrato') });
   const [f, setF] = useState<S | null>(null);
   useEffect(() => { if (q.data && !f) setF(q.data); }, [q.data, f]);
+  const runAlerts = useMutation({
+    mutationFn: () => api<{ created?: number; contractAlerts?: number }>('/contracts/alerts/run', { method: 'POST' }),
+    onSuccess: (r) => { qc.invalidateQueries({ queryKey: ['contracts'] }); toast({ tone: 'success', message: `Monitoramento rodado${typeof r.contractAlerts === 'number' ? `: ${r.contractAlerts} alerta(s) novo(s)` : ''}` }); },
+    onError: (e) => toast({ tone: 'error', message: errMsg(e) }),
+  });
   const save = useMutation({ mutationFn: () => api('/admin/contract-settings', { method: 'PUT', body: { ...f, financeEmail: f!.financeEmail || null, deliveryEmail: f!.deliveryEmail || null } }), onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin', 'contract-settings'] }); toast({ tone: 'success', message: 'Parâmetros de contratos salvos' }); }, onError: (e) => toast({ tone: 'error', message: errMsg(e) }) });
   if (q.isError) return <ErrorState error={q.error} onRetry={() => q.refetch()} />;
   if (!f) return <div className="card"><LoadingRows /></div>;
@@ -49,6 +54,10 @@ export function AdminContractSettings() {
         <p className="mb-4 max-w-3xl text-sm text-muted">Prazos dos alertas automáticos, destinatários e textos. Quem recebe as tarefas de cada etapa sai dos <Link className="link" to="/settings/users">setores dos usuários</Link> (Comercial, Inteligência Comercial, Financeiro, Jurídico, Sucesso do Cliente, Diretoria, Administração e Implantação).</p>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {DAYS.map(([k, label, hint]) => <FormField key={k} label={label} htmlFor={`cs-${k}`} hint={hint || undefined}><Input id={`cs-${k}`} inputMode="numeric" value={String(f[k])} onChange={(e) => set({ [k]: Number(e.target.value.replace(/\D/g, '')) || 0 } as Partial<S>)} /></FormField>)}
+        </div>
+        <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-line pt-4">
+          <Button loading={runAlerts.isPending} onClick={() => runAlerts.mutate()}>Rodar monitoramento agora</Button>
+          <p className="text-sm text-muted">A rotina diária roda sozinha às 7h. Use aqui depois de mudar os prazos ou corrigir datas de contratos.</p>
         </div>
       </section>
       <section className="card p-5">

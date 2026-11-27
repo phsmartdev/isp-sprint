@@ -197,7 +197,7 @@ export function ContractDetailPage() {
                 <Info label="Renovação prevista">{fmtDate(v.renewalAt)}</Info>
                 <Info label="Valor global">{fmtBRL(v.totalCents)}</Info>
                 <Info label="Faturamento">{v.billingDay ? `Dia ${v.billingDay}` : '—'}{v.billingTerms ? <span className="block text-sm text-muted">{v.billingTerms}</span> : null}</Info>
-                <Info label="Reajuste">{v.adjustmentIndex ?? '—'}{v.adjustmentBaseDate ? ` · data-base ${fmtDate(v.adjustmentBaseDate)}` : ''}{v.adjustmentRule ? <span className="block text-sm text-muted">{v.adjustmentRule}</span> : null}</Info>
+                <Info label="Reajuste">{v.adjustmentIndex ?? '—'}{v.adjustmentBaseDate ? ` · data-base ${fmtDate(v.adjustmentBaseDate)}` : ''}{v.adjustmentRule ? <span className="block text-sm text-muted">{v.adjustmentRule}</span> : null}{!v.adjustmentBaseDate && c.stage !== 'arquivado' && <span className="mt-1 block text-sm font-semibold text-warning">Sem data-base: o alerta de reajuste não dispara. Preencha em Editar.</span>}</Info>
                 <Info label="Responsável operacional">{c.operationalOwnerName ?? '—'}</Info>
                 <Info label="Sucesso do Cliente">{c.csmName ?? '—'}{c.validatedAt && <span className="block"><ContractJourney contractId={c.id} /></span>}</Info>
                 <Info label="ERP">{c.erpRef ?? <span className="text-[#C2610C]">Cadastro pendente</span>}</Info>
