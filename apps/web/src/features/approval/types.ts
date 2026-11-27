@@ -34,7 +34,7 @@ export type Analysis = {
   };
   identity: null | { contactIds: string[]; unresolved: number; candidates: { id: string; name: string; document: string | null; phone: string | null; email: string | null; city: string | null; lifecycle: string | null; match: string[]; decision: 'mesmo' | 'diferente' | null }[] };
   classification: null | { current: Classification | null; history: Classification[]; options: Record<string, string[]> };
-  terms: { proposedMonthlyCents: number | null; activationFeeCents: number | null; replacesMonthlyCents: number; negotiationType: NegotiationType; listMonthlyCents: number | null; discountBp: number; planName: string | null };
+  terms: { proposedMonthlyCents: number | null; activationFeeCents: number | null; termMonths?: number | null; replacesMonthlyCents: number; negotiationType: NegotiationType; listMonthlyCents: number | null; discountBp: number; planName: string | null };
   economics: null | { mode: 'recorrente' | 'pontual'; verdict: string; withinPolicy: boolean | null; missing: string[]; initialCents: number; contributionCents: number | null; marginPct: number | null; paybackMonths: number | null; termMonths: number };
   projections: { revenue12mCents: number | null; revenueLifetimeCents: number | null; ltvMonths: number | null };
   intelligence: null | {

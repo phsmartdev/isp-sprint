@@ -53,7 +53,7 @@ const CITIES: [string, number][] = [
   ['Aracaju', 38], ['Nossa Senhora do Socorro', 15], ['São Cristóvão', 11], ['Estância', 8], ['Lagarto', 7], ['Itabaiana', 5],
   ['Barra dos Coqueiros', 4], ['Tobias Barreto', 3], ['Simão Dias', 2], ['Propriá', 2], ['Itaporanga d\'Ajuda', 2], ['Capela', 2], ['Boquim', 1],
 ];
-const SOURCES: [string, number][] = [['WhatsApp', 27], ['Site', 23], ['Indicação', 20], ['Campanha', 13], ['Instagram', 11], ['Evento', 3], ['Tráfego', 3]];
+const SOURCES: [string, number][] = [['WhatsApp', 27], ['Site', 23], ['Indicação', 20], ['Campanha', 13], ['Instagram', 11], ['Evento', 3], ['Tráfego', 3], ['E-mail marketing', 0], ['Facebook', 0], ['Google', 0], ['Rádio', 0], ['Panfleto', 0], ['Outdoor', 0], ['Porta a porta', 0]];
 const INTERESTS = ['Oferta', 'Velocidade', 'Benefícios', 'Curiosidade', 'Preço', 'Estabilidade'];
 const CHANNELS = ['WhatsApp', 'Telefone', 'Site', 'Instagram', 'Presencial'];
 const INTERACTIONS = ['Formulário site', 'Ligação realizada', 'Proposta enviada', 'WhatsApp', 'Reunião agendada', 'Direct Instagram'];

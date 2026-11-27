@@ -204,7 +204,7 @@ function TrailView({ trail }: { trail: Trail[] }) {
 }
 
 type Detail = {
-  request: Row & { justification: string; kitId: string | null; kits: number; items: { itemId: string; qty: number }[]; kitCategory: KitCategory | null; collective: boolean; audience: string | null; attention: AttentionSituation[]; recipients: { stakeholderId: string; contactId: string; name: string; title: string | null; powerClass: string }[]; eventName: string | null; orgUnitId: string | null; rowVersion: number; executorName: string | null; cancelReason: string | null };
+  request: Row & { justification: string; campaignId?: string | null; opportunityId?: string | null; kitId: string | null; kits: number; items: { itemId: string; qty: number }[]; kitCategory: KitCategory | null; collective: boolean; audience: string | null; attention: AttentionSituation[]; recipients: { stakeholderId: string; contactId: string; name: string; title: string | null; powerClass: string }[]; eventName: string | null; orgUnitId: string | null; rowVersion: number; executorName: string | null; cancelReason: string | null };
   accounts: (Account & { nature: string | null; history?: { executed: number; investedCents: number; exceptions: number; inProgress: number; lastOn: string | null } })[];
   evaluation: Evaluation; level: string | null; decisions: { id: string; decision: ConcessionDecision; deciderName: string; level: string; reason: string | null; conditions: string | null; amountCents: number; createdAt: string }[];
   trail: Trail[];
@@ -218,7 +218,7 @@ type Preview = { evaluation: Evaluation; level: string | null; accounts: (Accoun
 function RequestForm({ catalog, units, initial, onClose, onSaved }: { catalog: Catalog; units: { id: string; name: string }[]; initial?: Detail; onClose: () => void; onSaved: (id: string) => void }) {
   const r = initial?.request;
   const [v, setV] = useState({
-    kind: (r?.kind ?? 'kit') as ConcessionKind, purpose: (r?.purpose ?? 'relacionamento') as ConcessionPurpose, eventName: r?.eventName ?? '', description: r?.description ?? '', justification: r?.justification ?? '',
+    kind: (r?.kind ?? 'kit') as ConcessionKind, purpose: (r?.purpose ?? 'relacionamento') as ConcessionPurpose, eventName: r?.eventName ?? '', campaignId: r?.campaignId ?? '', opportunityId: r?.opportunityId ?? '', description: r?.description ?? '', justification: r?.justification ?? '',
     plannedOn: r?.plannedOn ?? new Date().toISOString().slice(0, 10), kitId: r?.kitId ?? '', kits: String(r?.kits || 1), items: r?.items ?? [] as { itemId: string; qty: number }[], estimated: money(r?.estimatedCents), manualValue: !!r,
     kitCategory: (r?.kitCategory ?? '') as KitCategory | '', collective: r?.collective ?? false, audience: r?.audience ?? '', attention: r?.attention ?? [] as AttentionSituation[], orgUnitId: r?.orgUnitId ?? '', institutionalClass: r?.institutionalClass ?? '',
   });
@@ -229,12 +229,15 @@ function RequestForm({ catalog, units, initial, onClose, onSaved }: { catalog: C
   const [term, setTerm] = useState('');
   const found = useQuery({ queryKey: ['contacts-search', term], enabled: term.trim().length >= 2, queryFn: () => api<{ items: { id: string; name: string }[] }>(`/contacts?q=${encodeURIComponent(term)}`) });
   const stake = useQuery({ queryKey: ['compliance', 'stakeholders', accs.map((a) => a.contactId).join(',')], enabled: accs.length > 0, queryFn: async () => (await Promise.all(accs.map((a) => api<{ items: { id: string; name: string; title: string | null; powerClass?: string }[] }>(`/accounts/${a.contactId}/stakeholders`).then((x) => x.items.map((p) => ({ ...p, account: a.name })))))).flat() });
+  // finalidade Campanha / Oportunidade: escolher qual (as oportunidades vêm das contas beneficiadas)
+  const dest = useQuery({ queryKey: ['brindes', 'compliance', 'destinos', accs.map((a) => a.contactId).join(',')], enabled: v.purpose === 'campanha' || v.purpose === 'oportunidade',
+    queryFn: () => api<{ campaigns: { id: string; name: string }[]; opportunities: { id: string; title: string; code: number; account: string }[] }>(`/brindes/compliance/destinos?contactIds=${accs.map((a) => a.contactId).join(',')}`) });
   const kit = catalog.kits.find((x) => x.id === v.kitId);
   const autoCents = (kit ? kit.costCents * Number(v.kits || 0) : 0) + v.items.reduce((t, l) => t + l.qty * (catalog.items.find((i) => i.id === l.itemId)?.unitCostCents ?? 0), 0);
   const estimatedCents = v.manualValue ? toCents(v.estimated) : autoCents;
   const usesStock = v.kind !== 'patrocinio_financeiro';
   const body = {
-    kind: v.kind, purpose: v.purpose, eventName: v.eventName || null, description: v.description, justification: v.justification, plannedOn: v.plannedOn,
+    kind: v.kind, purpose: v.purpose, eventName: v.eventName || null, campaignId: v.purpose === 'campanha' ? v.campaignId || null : null, opportunityId: v.purpose === 'oportunidade' ? v.opportunityId || null : null, description: v.description, justification: v.justification, plannedOn: v.plannedOn,
     kitId: usesStock && v.kitId ? v.kitId : null, kits: usesStock && v.kitId ? Number(v.kits || 0) : 0, items: usesStock ? v.items.filter((l) => l.itemId && l.qty > 0) : [], estimatedCents,
     kitCategory: v.kitCategory || null, collective: v.collective, audience: v.audience || null, attention: v.attention, orgUnitId: v.orgUnitId || null, institutionalClass: accs.length ? null : v.institutionalClass || null,
     stakeholderIds: v.collective ? [] : people, accounts: accs.map((a) => ({ contactId: a.contactId, shareCents: rateio ? toCents(shares[a.contactId] ?? '') : null })),
@@ -248,7 +251,7 @@ function RequestForm({ catalog, units, initial, onClose, onSaved }: { catalog: C
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
   const save = useAct<{ id: string }>(r ? 'Solicitação alterada' : 'Solicitação registrada', (x) => onSaved(x.id ?? r!.id));
-  const ok = v.description.trim().length >= 5 && v.justification.trim().length >= 10 && (accs.length || v.institutionalClass.trim()) && (v.purpose !== 'evento' || v.eventName.trim()) && (!v.collective || v.audience.trim());
+  const ok = v.description.trim().length >= 5 && v.justification.trim().length >= 10 && (accs.length || v.institutionalClass.trim()) && (v.purpose !== 'evento' || v.eventName.trim()) && (v.purpose !== 'campanha' || v.campaignId) && (v.purpose !== 'oportunidade' || v.opportunityId) && (!v.collective || v.audience.trim());
   return (
     <Modal open onClose={onClose} size="xl" title={r ? `Alterar ${r.code}` : 'Nova solicitação de concessão'}
       footer={<><Button variant="ghost" onClick={onClose}>Cancelar</Button><Button variant="primary" disabled={!ok} loading={save.isPending} onClick={() => save.mutate(r ? { url: `/brindes/compliance/solicitacoes/${r.id}`, method: 'PATCH', body: { ...body, rowVersion: r.rowVersion } } : { url: '/brindes/compliance/solicitacoes', body })}>{r ? 'Salvar e reavaliar' : 'Enviar para avaliação'}</Button></>}>
@@ -257,6 +260,8 @@ function RequestForm({ catalog, units, initial, onClose, onSaved }: { catalog: C
           <FormField label="Tipo de concessão" htmlFor="rq-k"><Select id="rq-k" value={v.kind} onChange={(e) => setV({ ...v, kind: e.target.value as ConcessionKind })}>{CONCESSION_KINDS.map((x) => <option key={x} value={x}>{CONCESSION_KIND_LABELS[x]}</option>)}</Select></FormField>
           <FormField label="Finalidade" htmlFor="rq-p"><Select id="rq-p" value={v.purpose} onChange={(e) => setV({ ...v, purpose: e.target.value as ConcessionPurpose })}>{CONCESSION_PURPOSES.map((x) => <option key={x} value={x}>{CONCESSION_PURPOSE_LABELS[x]}</option>)}</Select></FormField>
           {v.purpose === 'evento' && <FormField label="Evento" htmlFor="rq-ev" required className="sm:col-span-2"><Input id="rq-ev" value={v.eventName} onChange={(e) => setV({ ...v, eventName: e.target.value })} /></FormField>}
+          {v.purpose === 'campanha' && <FormField label="Campanha" htmlFor="rq-camp" required className="sm:col-span-2"><Select id="rq-camp" value={v.campaignId} onChange={(e) => setV({ ...v, campaignId: e.target.value })}><option value="">{dest.isLoading ? 'Carregando…' : 'Escolha a campanha'}</option>{dest.data?.campaigns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</Select></FormField>}
+          {v.purpose === 'oportunidade' && <FormField label="Oportunidade" htmlFor="rq-opp" required className="sm:col-span-2" hint={accs.length ? undefined : 'Escolha a conta beneficiada abaixo para listar as oportunidades dela.'}><Select id="rq-opp" value={v.opportunityId} disabled={!accs.length} onChange={(e) => setV({ ...v, opportunityId: e.target.value })}><option value="">{!accs.length ? 'Escolha a conta primeiro' : dest.isLoading ? 'Carregando…' : dest.data?.opportunities.length ? 'Escolha a oportunidade' : 'Nenhuma oportunidade nas contas escolhidas'}</option>{dest.data?.opportunities.map((o) => <option key={o.id} value={o.id}>OP-{o.code} · {o.title}{accs.length > 1 ? ` · ${o.account}` : ''}</option>)}</Select></FormField>}
           <FormField label="Descrição" htmlFor="rq-d" required className="sm:col-span-2"><Input id="rq-d" value={v.description} onChange={(e) => setV({ ...v, description: e.target.value })} placeholder="O que será concedido" /></FormField>
           <FormField label="Justificativa institucional ou comercial" htmlFor="rq-j" required className="sm:col-span-2"><Textarea id="rq-j" rows={2} value={v.justification} onChange={(e) => setV({ ...v, justification: e.target.value })} /></FormField>
 
