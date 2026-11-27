@@ -4,6 +4,7 @@ import { alias } from 'drizzle-orm/pg-core';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import {
+  taskCategory, taskOrigin,
   RACI_KEYS, RECURRENCE_FREQS, TASK_MANUAL_STATUSES, slaDueAt, TASK_STATUSES, TASK_STATUS_LABELS, atLeast, bucketOf, checklistProgress, createsCycle, describeRecurrence, validateRecurrence,
   type ChecklistItem, type MyTaskBucket, type TaskStatus,
 } from '@isp/domain';
@@ -15,6 +16,7 @@ import * as s from '../db/schema';
 import { level } from '../services/scope';
 import { assertProjectLinks, dueAtOf, loadProject, todayLocal } from '../services/projects';
 import { notifyTask, noticesOf } from '../services/contractNotify';
+import { assertBoardManagement } from './workBoards';
 import { activityScope, applyStatus, assertAssignee, assertUsersActive, blockersOf, decideApproval, loadTask, taskEvent } from '../services/tasks';
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Data inválida');
@@ -216,6 +218,11 @@ export const taskRoutes = [
         ...dto(row!, auth, today),
         subtasks: subtasks.map((r) => dto(r, auth, today)), blockedBy, blocking, comments, time, files, events, parent: parent ?? null,
         people: users, stages, milestones, blockers, can,
+        // Quadro de Tarefas: planejamento da tarefa (departamento, 70/20/10, esforço, semana, envio entre times)
+        planning: {
+          boardKey: t.boardKey, originBoard: t.originBoard, sentAt: t.sentAt, category: taskCategory(t), categoryAuto: !t.capacityCategory && !!taskCategory(t), origin: taskOrigin(t),
+          estimateMinutes: t.estimateMinutes, remainingMinutes: t.remainingMinutes, agreedDueAt: t.agreedDueAt, plannedWeek: t.plannedWeek, protectedCommitment: t.protectedCommitment,
+        },
       };
     },
   }),
@@ -294,6 +301,9 @@ export const taskRoutes = [
         if (t.rowVersion !== body.rowVersion) throw conflict(t.rowVersion);
         const onlyChecklist = Object.keys(body).every((k) => ['rowVersion', 'checklist'].includes(k));
         if (!can.edit && !(onlyChecklist && t.participants.includes(auth.userId))) throw forbidden('Você pode comentar, mas não alterar esta tarefa.');
+        // tarefa enviada por outro time: responsável e prazo são da liderança do time que recebeu (quem enviou só acompanha)
+        const curDue = t.dueAt ? new Intl.DateTimeFormat('en-CA', { timeZone: auth.timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(t.dueAt) : null;
+        if (t.ownerId !== auth.userId && ((body.ownerId && body.ownerId !== t.ownerId) || (body.dueOn !== undefined && body.dueOn !== curDue))) await assertBoardManagement(tx, auth, t);
         const events: { type: string; payload: Record<string, unknown> }[] = [];
         const ownerId = body.ownerId ?? t.ownerId;
         if (body.ownerId && body.ownerId !== t.ownerId) {

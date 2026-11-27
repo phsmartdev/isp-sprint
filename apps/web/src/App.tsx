@@ -135,6 +135,8 @@ const AcademyStudioPage = lazy(() => import('./pages/playbooks/academy/Studio').
 const AcademyEditorPage = lazy(() => import('./pages/playbooks/academy/Manage').then((m) => ({ default: m.AcademyEditorPage })));
 const ApiDocsPage = lazy(() => import('./pages/playbooks/ApiDocs').then((m) => ({ default: m.ApiDocsPage })));
 const AdminPlans = lazy(() => import('./pages/admin/Admin').then((m) => ({ default: m.AdminPlans })));
+const WorkBoardPage = lazy(() => import('./pages/boards/WorkBoard').then((m) => ({ default: m.WorkBoardPage })));
+const BoardsSettingsPage = lazy(() => import('./pages/admin/BoardsSettings').then((m) => ({ default: m.BoardsSettingsPage })));
 const AdminSources = lazy(() => import('./pages/admin/Admin').then((m) => ({ default: m.AdminSources })));
 const AdminIntegrations = lazy(() => import('./pages/admin/Admin').then((m) => ({ default: m.AdminIntegrations })));
 const AdminSecurity = lazy(() => import('./pages/admin/Admin').then((m) => ({ default: m.AdminSecurity })));
@@ -255,6 +257,9 @@ export function App() {
         <Route path="playbooks/:id/versoes" element={<Suspense fallback={<LoadingRows rows={6} />}><PlaybookVersionsPage /></Suspense>} />
         <Route path="playbooks/:id/aprovar/:versionId" element={<Suspense fallback={<LoadingRows rows={6} />}><PlaybookApprovePage /></Suspense>} />
         <Route path="brindes" element={<GiftsPage />} />
+        <Route path="quadro/comercial" element={<Gate module="atividades" feature="crm.quadro_tarefas"><WorkBoardPage /></Gate>} />
+        <Route path="quadro/sucesso_cliente" element={<Gate module="atividades" feature="crm.quadro_sucesso"><WorkBoardPage /></Gate>} />
+        <Route path="quadro/produto" element={<Gate module="atividades" feature="produto.quadro_tarefas"><WorkBoardPage /></Gate>} />
         <Route path="marketing/quadro" element={<Gate module="campanhas" feature="marketing.quadro"><MarketingBoardPage /></Gate>} />
         <Route path="times/ferias" element={<GoTo to="/times/pessoas" aba="ferias" />} />
         <Route path="times/gamificacao" element={<GoTo to="/times/pessoas" aba="gamificacao" />} />
@@ -317,6 +322,7 @@ export function App() {
           <Route path="proposals" element={<Navigate to="/settings/modelos?aba=propostas" replace />} />
           <Route path="contract-templates" element={<Navigate to="/settings/modelos?aba=contratos" replace />} />
           <Route path="sources" element={<AdminSources />} />
+          <Route path="quadros" element={<BoardsSettingsPage />} />
           <Route path="integrations" element={<AdminIntegrations />} />
           <Route path="webservice" element={<AdminWebservice />} />
           <Route path="notifications" element={<Navigate to="/settings/modelos?aba=emails" replace />} />

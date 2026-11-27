@@ -78,3 +78,4 @@ export * from './studio';
 
 export * from './sectionCompatibility';
 export * from './glpiSla';
+export * from './workBoards';

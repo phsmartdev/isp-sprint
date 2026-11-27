@@ -1324,6 +1324,20 @@
       "when": 1795790998703,
       "tag": "0188_canais_entrada",
       "breakpoints": true
+    },
+    {
+      "idx": 189,
+      "version": "7",
+      "when": 1795794576919,
+      "tag": "0189_quadro_tarefas",
+      "breakpoints": true
+    },
+    {
+      "idx": 190,
+      "version": "7",
+      "when": 1795794901174,
+      "tag": "0190_tarefa_enviada",
+      "breakpoints": true
     }
   ]
 }

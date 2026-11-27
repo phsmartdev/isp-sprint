@@ -211,7 +211,8 @@ async function buildAuth(db: DB, row: UserBasics): Promise<AuthContext> {
     ipBypass: !!row.ipBypass,
     modules,
     moduleReasons: Object.fromEntries(BUSINESS_MODULES.map((m) => [m, decisions[m].reason])) as Record<BusinessModule, ModuleDecision['reason']>,
-    disabledFeatures: [...new Set(tms.flatMap((x) => x.disabledFeatures))],
+    // sem linha gravada para o módulo, vale o padrão (que já deixa desligado o que começa desligado, como os Quadros de Tarefas)
+    disabledFeatures: [...new Set(BUSINESS_MODULES.flatMap((m) => tms.find((x) => x.module === m)?.disabledFeatures ?? defaultTenantModule(m).disabledFeatures))],
     actions,
     teamIds: memberships.map((m) => m.teamId),
     teamMemberIds: [...new Set([row.userId, ...members.map((m) => m.userId)])],

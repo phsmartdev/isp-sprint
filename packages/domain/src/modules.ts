@@ -58,11 +58,14 @@ export const FEATURES = [
   { key: 'crm.email', module: 'crm', label: 'E-mail corporativo' },
   { key: 'crm.chamados', module: 'crm', label: 'Chamados no GLPI a partir da negociação', needs: ['oportunidades'] },
   { key: 'crm.viabilidade', module: 'crm', label: 'Viabilidade econômica (motor financeiro, envelope fiscal, Financial Studio e decisão da viabilidade)', needs: ['oportunidades'] },
+  { key: 'crm.quadro_tarefas', module: 'crm', label: 'Quadro de Tarefas do Comercial e Contratos (planejamento semanal, capacidade 70/20/10 e Sprint)', needs: ['atividades'] },
+  { key: 'crm.quadro_sucesso', module: 'crm', label: 'Quadro de Tarefas do Sucesso do Cliente', needs: ['atividades'] },
   { key: 'crm.projeto_licitacao', module: 'crm', label: 'Projeto de licitação (rito em etapas, planejamento, prazos pelo edital, RACI, aprovações e Gantt)', needs: ['oportunidades'], requires: ['projetos'] },
   { key: 'marketing.leads', module: 'marketing', label: 'Leads' },
   { key: 'marketing.abm', module: 'marketing', label: 'ABM', needs: ['leads', 'campanhas'] },
   { key: 'marketing.campanhas', module: 'marketing', label: 'Campanhas' },
   { key: 'marketing.quadro', module: 'marketing', label: 'Quadro de tarefas do Marketing (Sprint, fura-fila, etiquetas, orçamento e brindes)' },
+  { key: 'produto.quadro_tarefas', module: 'produto', label: 'Quadro de Tarefas do Produto', needs: ['atividades'] },
   { key: 'produto.catalogo', module: 'produto', label: 'Página de catálogo', needs: ['oportunidades', 'contratos'] },
   { key: 'gestao_time.desempenho', module: 'gestao_time', label: 'Metas e indicadores' },
   { key: 'gestao_time.times', module: 'gestao_time', label: 'Apuração, intervenções e rituais' },
@@ -98,6 +101,8 @@ export const ROUTE_FEATURE_RULES: { prefix: string; exact?: boolean; methods?: s
   { prefix: '/leads', feature: 'marketing.leads' },
   { prefix: '/campaigns', feature: 'marketing.campanhas' },
   { prefix: '/marketing/quadro', feature: 'marketing.quadro' },
+  // Quadros de Tarefas dos departamentos (a rota de cada quadro confere a funcionalidade dele)
+  { prefix: '/quadros', feature: null },
   { prefix: '/abm', feature: 'marketing.abm' },
   { prefix: '/accounts/:id/cadences', feature: 'marketing.abm' },
   { prefix: '/accounts/:id/coverage', feature: 'marketing.abm' },
@@ -173,7 +178,9 @@ export type ModuleGrant = { module: BusinessModule; subjectType: 'equipe' | 'usu
 
 /** Sem configuração gravada = módulo ligado para todos (comportamento anterior à Etapa 1). */
 /** Pessoas & Cultura nasce em teste: ligado, mas só para quem a empresa liberar (equipe ou pessoa). */
-export const defaultTenantModule = (module: BusinessModule): TenantModule => ({ module, enabled: true, mode: module === 'pessoas_cultura' ? 'liberados' : 'todos', disabledFeatures: [] });
+/** Funcionalidades que começam desligadas (a empresa liga quando for adotar): os Quadros de Tarefas dos departamentos. */
+export const OPT_IN_FEATURES: Partial<Record<BusinessModule, string[]>> = { crm: ['crm.quadro_tarefas', 'crm.quadro_sucesso'], produto: ['produto.quadro_tarefas'] };
+export const defaultTenantModule = (module: BusinessModule): TenantModule => ({ module, enabled: true, mode: module === 'pessoas_cultura' ? 'liberados' : 'todos', disabledFeatures: [...(OPT_IN_FEATURES[module] ?? [])] });
 
 export type ModuleDecision = { enabled: boolean; reason: 'empresa_desligou' | 'pessoa_bloqueada' | 'pessoa_liberada' | 'perfil_liberado' | 'equipe_bloqueada' | 'equipe_liberada' | 'todos' | 'nao_liberado' };
 
